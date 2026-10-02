@@ -6,7 +6,118 @@ param([switch]$VytvoritZastupce)
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+# Ostré vykreslení při zvětšení zobrazení ve Windows (125 %, 150 % …): bez tohoto Windows aplikaci
+# vykreslí v malém a roztáhnou ji, takže vypadá rozmazaně a „kostičkovaně“. Musí proběhnout před vytvořením oken.
+try {
+    if (-not ('KcDpi' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class KcDpi {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+}
+'@
+    }
+    try { [void][KcDpi]::SetProcessDpiAwareness(2) } catch { [void][KcDpi]::SetProcessDPIAware() }
+} catch { }
 [System.Windows.Forms.Application]::EnableVisualStyles()
+
+# Měřítko obrazovky (1 = 100 %, 1.25 = 125 % …) pro ruční rozměry v pixelech
+$script:S = 1.0
+try { $gd = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero); $script:S = $gd.DpiX / 96.0; $gd.Dispose() } catch { }
+function Px([double]$n) { [int][Math]::Round($n * $script:S) }
+
+# Zaoblená tlačítka a karty s vyhlazenými okraji (kreslené vlastním kódem, bez „zubatých“ rohů)
+if (-not ('KcButton' -as [type])) {
+    Add-Type -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing' -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+
+public static class KcShapes {
+    public static GraphicsPath Round(RectangleF r, float rad) {
+        GraphicsPath p = new GraphicsPath();
+        float d = Math.Min(2 * rad, Math.Min(r.Width, r.Height));
+        if (d < 1) { p.AddRectangle(r); return p; }
+        p.AddArc(r.X, r.Y, d, d, 180, 90);
+        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        p.CloseFigure();
+        return p;
+    }
+    public static Color ParentBack(Control c) {
+        return c.Parent != null ? c.Parent.BackColor : SystemColors.Control;
+    }
+    public static Color Shade(Color c, double f) {
+        return Color.FromArgb((int)(c.R * f), (int)(c.G * f), (int)(c.B * f));
+    }
+}
+
+public class KcButton : Button {
+    public int Radius = 8;
+    public bool NoHover = false;
+    private bool hover, down;
+
+    public KcButton() {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        FlatStyle = FlatStyle.Flat;
+        FlatAppearance.BorderSize = 0;
+        UseVisualStyleBackColor = false;
+    }
+    protected override bool ShowFocusCues { get { return false; } }
+    protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
+
+    protected override void OnPaint(PaintEventArgs e) {
+        Graphics g = e.Graphics;
+        g.Clear(KcShapes.ParentBack(this));
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        float s = g.DpiX / 96f;
+        Color fill = BackColor;
+        if (!NoHover && Enabled) {
+            if (down) fill = KcShapes.Shade(fill, 0.85);
+            else if (hover) fill = KcShapes.Shade(fill, 0.92);
+        }
+        using (GraphicsPath path = KcShapes.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Radius * s))
+        using (SolidBrush b = new SolidBrush(fill)) {
+            g.FillPath(b, path);
+        }
+        Color fc = Enabled ? ForeColor : Color.FromArgb(140, ForeColor);
+        TextRenderer.DrawText(g, Text, Font, ClientRectangle, fc, fill,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+    }
+}
+
+public class KcPanel : Panel {
+    public int Radius = 12;
+    public Color BorderColor = Color.Gainsboro;
+
+    public KcPanel() {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+        Graphics g = e.Graphics;
+        g.Clear(KcShapes.ParentBack(this));
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        float s = g.DpiX / 96f;
+        using (GraphicsPath path = KcShapes.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Radius * s))
+        using (SolidBrush b = new SolidBrush(BackColor))
+        using (Pen pen = new Pen(BorderColor)) {
+            g.FillPath(b, path);
+            g.DrawPath(pen, path);
+        }
+    }
+}
+'@
+}
 
 # ---------- Stav ----------
 $script:Items = New-Object System.Collections.Generic.List[object]
@@ -126,27 +237,9 @@ function Get-Shade($c, [double]$f) {
     [System.Drawing.Color]::FromArgb([int]($c.R * $f), [int]($c.G * $f), [int]($c.B * $f))
 }
 
-# Zaoblené rohy ovládacího prvku (poloměr v Tag)
-$script:RoundHandler = {
-    param($s, $e)
-    try {
-        $r = [int]$s.Tag
-        $w = $s.Width; $h = $s.Height
-        if ($w -le 2 * $r -or $h -le 2 * $r) { return }
-        $d = 2 * $r
-        $path = New-Object System.Drawing.Drawing2D.GraphicsPath
-        $path.AddArc(0, 0, $d, $d, 180, 90)
-        $path.AddArc($w - $d, 0, $d, $d, 270, 90)
-        $path.AddArc($w - $d, $h - $d, $d, $d, 0, 90)
-        $path.AddArc(0, $h - $d, $d, $d, 90, 90)
-        $path.CloseFigure()
-        $s.Region = New-Object System.Drawing.Region($path)
-    } catch { }
-}
+# Poloměr zaoblení (jen u tlačítek KcButton a karet KcPanel)
 function Set-Rounded($ctrl, [int]$radius) {
-    $ctrl.Tag = $radius
-    $ctrl.Add_Resize($script:RoundHandler)
-    & $script:RoundHandler $ctrl $null
+    if ($ctrl -is [KcButton] -or $ctrl -is [KcPanel]) { $ctrl.Radius = $radius; $ctrl.Invalidate() }
 }
 
 function Set-FlatButton($btn, $back, $fore) {
@@ -161,7 +254,7 @@ function Set-FlatButton($btn, $back, $fore) {
 }
 
 function New-Button([string]$text, $back, $fore) {
-    $b = New-Object System.Windows.Forms.Button
+    $b = New-Object KcButton
     $b.Text = $text
     $b.AutoSize = $true
     $b.Height = 36
@@ -175,7 +268,7 @@ function New-Button([string]$text, $back, $fore) {
 
 # Velké tlačítko vyplňující buňku
 function New-BigButton([string]$text, $back, $fore, $font) {
-    $b = New-Object System.Windows.Forms.Button
+    $b = New-Object KcButton
     $b.Text = $text
     $b.Dock = 'Fill'
     $b.Font = $font
@@ -192,19 +285,14 @@ function New-GhostButton([string]$text, $back = $null) {
 }
 
 function New-Card {
-    $outer = New-Object System.Windows.Forms.Panel
-    $outer.Dock = 'Fill'
-    $outer.BackColor = $cBorder
-    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
-    $outer.Margin = New-Object System.Windows.Forms.Padding(6)
-    $inner = New-Object System.Windows.Forms.Panel
-    $inner.Dock = 'Fill'
-    $inner.BackColor = $cCard
-    $inner.Padding = New-Object System.Windows.Forms.Padding(16, 12, 16, 12)
-    $outer.Controls.Add($inner)
-    Set-Rounded $outer 12
-    Set-Rounded $inner 11
-    @{ Outer = $outer; Inner = $inner }
+    $card = New-Object KcPanel
+    $card.Dock = 'Fill'
+    $card.BackColor = $cCard
+    $card.BorderColor = $cBorder
+    $card.Radius = 12
+    $card.Margin = New-Object System.Windows.Forms.Padding(6)
+    $card.Padding = New-Object System.Windows.Forms.Padding(16, 12, 16, 12)
+    @{ Outer = $card; Inner = $card }
 }
 
 function New-Caption([string]$text) {
@@ -245,8 +333,22 @@ function New-KcBitmap([int]$size) {
     $font.Dispose(); $brush.Dispose(); $path.Dispose(); $g.Dispose()
     $bmp
 }
+# Vlastní identita procesu pro hlavní panel Windows: okno se neseskupí s ostatními okny PowerShellu
+# a na liště se zobrazí ikona KC
 try {
-    $iconBmp = New-KcBitmap 64
+    if (-not ('KcTaskbar' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class KcTaskbar {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+}
+'@
+    }
+    [void][KcTaskbar]::SetCurrentProcessExplicitAppUserModelID('KontrolaClearance.App')
+} catch { }
+try {
+    $iconBmp = New-KcBitmap 256
     $form.Icon = [System.Drawing.Icon]::FromHandle($iconBmp.GetHicon())
 } catch { }
 
@@ -293,6 +395,9 @@ $form.Size = New-Object System.Drawing.Size(1200, 820)
 $form.MinimumSize = New-Object System.Drawing.Size(950, 650)
 $form.StartPosition = 'CenterScreen'
 $form.Font = $fontBase
+# Pevné rozměry v pixelech (výšky řádků, okraje …) se přepočtou podle měřítka obrazovky
+$form.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
+$form.AutoScaleMode = 'Dpi'
 $form.BackColor = $cBg
 $form.ForeColor = $cText
 
@@ -313,36 +418,22 @@ $lblApp.AutoSize = $true
 $lblApp.Anchor = 'Left'
 $lblApp.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $lblApp.ForeColor = $cAccent
-$lblState = New-Object System.Windows.Forms.Label
+$lblState = New-Object KcButton
+$lblState.NoHover = $true
+$lblState.TabStop = $false
+$lblState.Cursor = [System.Windows.Forms.Cursors]::Default
 $lblState.AutoSize = $true
 $lblState.Anchor = 'Left'
 $lblState.Margin = New-Object System.Windows.Forms.Padding(18, 0, 0, 0)
 $lblState.Padding = New-Object System.Windows.Forms.Padding(12, 5, 12, 5)
 $lblState.Font = $fontState
-Set-Rounded $lblState 12
+Set-Rounded $lblState 14
 $lblPos = New-Object System.Windows.Forms.Label
 $lblPos.AutoSize = $true
 $lblPos.Anchor = 'Right'
 $lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $lblPos.ForeColor = $cText
-$lblApp.Anchor = 'None'
-$lblApp.Margin = New-Object System.Windows.Forms.Padding(6, 0, 0, 0)
-$picLogo = New-Object System.Windows.Forms.PictureBox
-$picLogo.Size = New-Object System.Drawing.Size(34, 34)
-$picLogo.SizeMode = 'Zoom'
-$picLogo.Anchor = 'None'
-$picLogo.Margin = New-Object System.Windows.Forms.Padding(0)
-try { $picLogo.Image = New-KcBitmap 68 } catch { }
-$appBox = New-Object System.Windows.Forms.TableLayoutPanel
-$appBox.AutoSize = $true
-$appBox.AutoSizeMode = 'GrowAndShrink'
-$appBox.ColumnCount = 2
-$appBox.RowCount = 1
-$appBox.Anchor = 'Left'
-$appBox.Margin = New-Object System.Windows.Forms.Padding(0)
-$appBox.Controls.Add($picLogo, 0, 0)
-$appBox.Controls.Add($lblApp, 1, 0)
-$header.Controls.Add($appBox, 0, 0)
+$header.Controls.Add($lblApp, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
 $chkMiddle = New-Object System.Windows.Forms.CheckBox
 $chkMiddle.Text = 'Vkládat Ctrl + kliknutím'
@@ -422,7 +513,7 @@ $importPanel.Controls.AddRange(@($btnLoad, $btnClear, $lblCount))
 $lstItems = New-Object System.Windows.Forms.ListBox
 $lstItems.Dock = 'Fill'
 $lstItems.DrawMode = 'OwnerDrawFixed'
-$lstItems.ItemHeight = 28
+$lstItems.ItemHeight = Px 28
 $lstItems.IntegralHeight = $false
 $lstItems.BorderStyle = 'None'
 $lstItems.BackColor = $cInput
@@ -454,7 +545,7 @@ $lblCurrentCap.TextAlign = 'MiddleLeft'
 $lblCurrentCap.Font = $fontSmall
 $lblCurrentCap.ForeColor = $cMuted
 function New-NavButton([string]$text) {
-    $b = New-Object System.Windows.Forms.Button
+    $b = New-Object KcButton
     $b.Text = $text
     $b.Dock = 'Fill'
     $b.Font = New-Object System.Drawing.Font('Segoe UI', 11)
@@ -535,7 +626,7 @@ $right.RowCount = 5
 $notesCard.Inner.Controls.Add($right)
 
 $lblTitle = New-Object System.Windows.Forms.Label
-$lblTitle.Text = 'Název souboru'
+$lblTitle.Text = 'Název souboru (.txt)'
 $lblTitle.Dock = 'Fill'
 $lblTitle.Font = $fontHead
 $titleRow = New-Object System.Windows.Forms.TableLayoutPanel
@@ -548,14 +639,9 @@ $titleRow.ColumnCount = 2
 $txtFileName = New-Object System.Windows.Forms.TextBox
 $txtFileName.Dock = 'Fill'
 $txtFileName.Font = New-Object System.Drawing.Font('Segoe UI', 11)
-$txtFileName.Margin = New-Object System.Windows.Forms.Padding(0, 6, 4, 0)
-$lblExt = New-Object System.Windows.Forms.Label
-$lblExt.Text = '.txt'
-$lblExt.AutoSize = $true
-$lblExt.Anchor = 'Left'
-$lblExt.ForeColor = $cMuted
+$txtFileName.Margin = New-Object System.Windows.Forms.Padding(0, 6, 0, 0)
 $titleRow.Controls.Add($txtFileName, 0, 0)
-$titleRow.Controls.Add($lblExt, 1, 0)
+$titleRow.SetColumnSpan($txtFileName, 2)
 $lblNotes = New-Object System.Windows.Forms.Label
 $lblNotes.Text = 'Poznámky'
 $lblNotes.Dock = 'Fill'
@@ -629,7 +715,7 @@ $lstItems.Add_DrawItem({ param($s, $e)
         $bb.Dispose()
         if ($isCur) {
             $ab = New-Object System.Drawing.SolidBrush($cAccent)
-            $g.FillRectangle($ab, $r.X, $r.Y, 4, $r.Height)
+            $g.FillRectangle($ab, $r.X, $r.Y, (Px 4), $r.Height)
             $ab.Dispose()
         }
         $flags = [System.Windows.Forms.TextFormatFlags]'VerticalCenter, EndEllipsis, NoPrefix, SingleLine'
@@ -639,12 +725,12 @@ $lstItems.Add_DrawItem({ param($s, $e)
             'del'    { $mark = '✗'; $markColor = $cNo }
             'unsure' { $mark = '?'; $markColor = $cUnsure }
         }
-        $wRest = [Math]::Max(10, $r.Width - 80)
+        $wRest = [Math]::Max(10, $r.Width - (Px 80))
         $wVal = [int]($wRest * 0.45)
-        $numRect  = New-Object System.Drawing.Rectangle(($r.X + 8), $r.Y, 40, $r.Height)
-        $markRect = New-Object System.Drawing.Rectangle(($r.X + 48), $r.Y, 24, $r.Height)
-        $valRect  = New-Object System.Drawing.Rectangle(($r.X + 76), $r.Y, $wVal, $r.Height)
-        $noteRect = New-Object System.Drawing.Rectangle(($r.X + 84 + $wVal), $r.Y, ($wRest - $wVal - 8), $r.Height)
+        $numRect  = New-Object System.Drawing.Rectangle(($r.X + (Px 8)), $r.Y, (Px 40), $r.Height)
+        $markRect = New-Object System.Drawing.Rectangle(($r.X + (Px 48)), $r.Y, (Px 24), $r.Height)
+        $valRect  = New-Object System.Drawing.Rectangle(($r.X + (Px 76)), $r.Y, $wVal, $r.Height)
+        $noteRect = New-Object System.Drawing.Rectangle(($r.X + (Px 84) + $wVal), $r.Y, ($wRest - $wVal - (Px 8)), $r.Height)
         [System.Windows.Forms.TextRenderer]::DrawText($g, "$($e.Index + 1)", $fontSmall, $numRect, $cMuted, $flags)
         [System.Windows.Forms.TextRenderer]::DrawText($g, $mark, $fontState, $markRect, $markColor, $flags)
         $valFont = if ($isCur) { $fontHead } else { $fontBase }
