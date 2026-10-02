@@ -808,7 +808,7 @@ $BtnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.
 $BtnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
 
 # Vložit mezi: vloží se řádky z Excelu stejně jako do hlavního pole (Ctrl+V), zařadí se za aktuální řádek
-# (každý do své složky); aktuální řádek se nemění
+# do stejné složky jako aktuální řádek; aktuální řádek se nemění
 $BtnInsert.Add_Click({ Invoke-Safe {
     if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
     [xml]$dx = @'
@@ -817,7 +817,7 @@ $BtnInsert.Add_Click({ Invoke-Safe {
         ShowInTaskbar="False" FontFamily="Segoe UI" FontSize="14" Background="White" UseLayoutRounding="True">
   <Grid Margin="18">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <TextBlock Text="Vložte řádky z Excelu (Ctrl+V) – zařadí se hned za aktuální řádek, každý do své složky." TextWrapping="Wrap" Foreground="#475569"/>
+    <TextBlock Text="Vložte řádky z Excelu (Ctrl+V) – zařadí se hned pod aktuální řádek (do jeho složky)." TextWrapping="Wrap" Foreground="#475569"/>
     <TextBox Name="Box" Grid.Row="1" Margin="0,10,0,10" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
              FontFamily="Consolas" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" Padding="8,6"
              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
@@ -865,6 +865,8 @@ $BtnInsert.Add_Click({ Invoke-Safe {
         $current = $script:Items[$script:Index]
         $list = New-Object System.Collections.Generic.List[object]
         $list.AddRange($script:Items)
+        # vložené řádky patří do složky aktuálního řádku, aby se objevily přímo pod ním
+        foreach ($it in $script:InsertParsed) { $it.Category = $current.Category }
         $list.InsertRange($script:Index + 1, $script:InsertParsed)
         $script:Items = Group-Items $list
         $script:Index = $script:Items.IndexOf($current)   # aktuální řádek zůstává stejný

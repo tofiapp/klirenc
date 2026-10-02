@@ -33,7 +33,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - Po rozhodnutí se automaticky přejde na další nerozhodnutý řádek.
    - Šipkami **▲ ▼**, kliknutím na řádek v seznamu nebo klávesami ↑ ↓ v seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku odebere.
 5. **Vkládání do jiné aplikace:** dokud aplikace běží (i na pozadí), **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem **Vkládat Ctrl + kliknutím** nahoře.
-5b. **+ Vložit mezi** otevře okno, do kterého vložíte řádky z Excelu stejně jako do hlavního pole. Zařadí se hned za aktuální řádek, každý do své složky. Aktuální řádek se nezmění.
+5b. **+ Vložit mezi** otevře okno, do kterého vložíte řádky z Excelu stejně jako do hlavního pole. Zařadí se hned pod aktuální řádek, do jeho složky. Aktuální řádek se nezmění.
 6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
 7. Ukládání (vždy UTF-8 `.txt`, v aplikaci se nic nemaže):
    - **Uložit** zapíše do otevřeného souboru. Pokud jste v poli **Název souboru** změnili název, soubor se ve stejné složce **přejmenuje**.
