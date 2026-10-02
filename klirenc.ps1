@@ -9,12 +9,14 @@ Add-Type -AssemblyName System.Drawing
 $script:Items = New-Object System.Collections.Generic.List[object]
 $script:Index = 0
 $script:Highlighting = $false
+$script:Done = $false          # všechny řádky rozhodnuty a zobrazuje se dokončení
 $script:PastedCols = 0      # kolik sloupců mělo poslední vložení (před ořezáním)
 $script:NotesFile = $null   # soubor, do kterého se poznámky ukládají (po Otevřít / Uložit jako)
 
-# Line = číslo řádku ve vstupním poli (-1 u záznamů přidaných přes Vložit mezi)
-function New-Item2([string]$value, [string]$note, [int]$line = -1) {
-    [pscustomobject]@{ Value = $value; Note = $note; Line = $line }
+# Status: '' = nerozhodnuto, 'keep' = Ponechat, 'del' = Vymazat (poznámka zapsána)
+# Manual = záznam přidaný přes Vložit mezi
+function New-Item2([string]$value, [string]$note, [bool]$manual = $false) {
+    [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual }
 }
 
 function Show-Info([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'klirenc', 'OK', 'Information') }
@@ -81,7 +83,7 @@ function ConvertFrom-Rows([string]$text) {
         if ($v -eq '') {
             return @{ Ok = $false; Error = "Řádek $rowNo má prázdný první sloupec (Údaj k ověření).`nNic nebylo načteno." }
         }
-        $result.Add((New-Item2 $v $n $i))
+        $result.Add((New-Item2 $v $n))
     }
     return @{ Ok = $true; Items = $result; Columns = $columns }
 }
@@ -288,8 +290,9 @@ $currentCard.Inner.Controls.Add($lblCurrentCap)
 
 $actionPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $actionPanel.Dock = 'Fill'
-$actionPanel.ColumnCount = 3
+$actionPanel.ColumnCount = 4
 $actionPanel.Padding = New-Object System.Windows.Forms.Padding(3, 0, 3, 3)
+[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute', 70)))
 [void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 40)))
 [void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 40)))
 [void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 20)))
@@ -313,9 +316,31 @@ $btnInsert.Margin = New-Object System.Windows.Forms.Padding(3)
 Set-FlatButton $btnInsert $cCard $cAccent
 $btnInsert.FlatAppearance.BorderSize = 1
 $btnInsert.FlatAppearance.BorderColor = $cAccent
-$actionPanel.Controls.Add($btnYes, 0, 0)
-$actionPanel.Controls.Add($btnNo, 1, 0)
-$actionPanel.Controls.Add($btnInsert, 2, 0)
+# Ruční procházení seznamu
+$navPanel = New-Object System.Windows.Forms.TableLayoutPanel
+$navPanel.Dock = 'Fill'
+$navPanel.RowCount = 2
+$navPanel.Margin = New-Object System.Windows.Forms.Padding(0)
+[void]$navPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))
+[void]$navPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))
+$btnUp = New-Object System.Windows.Forms.Button
+$btnUp.Text = '▲'
+$btnUp.Dock = 'Fill'
+$btnUp.Font = $fontState
+$btnUp.Margin = New-Object System.Windows.Forms.Padding(3)
+Set-FlatButton $btnUp $cNeutral $cText
+$btnDown = New-Object System.Windows.Forms.Button
+$btnDown.Text = '▼'
+$btnDown.Dock = 'Fill'
+$btnDown.Font = $fontState
+$btnDown.Margin = New-Object System.Windows.Forms.Padding(3)
+Set-FlatButton $btnDown $cNeutral $cText
+$navPanel.Controls.Add($btnUp, 0, 0)
+$navPanel.Controls.Add($btnDown, 0, 1)
+$actionPanel.Controls.Add($navPanel, 0, 0)
+$actionPanel.Controls.Add($btnYes, 1, 0)
+$actionPanel.Controls.Add($btnNo, 2, 0)
+$actionPanel.Controls.Add($btnInsert, 3, 0)
 $left.Controls.Add($actionPanel, 0, 2)
 
 # --- Pravá část: poznámky ---
@@ -391,40 +416,82 @@ function Set-State([string]$text, $back, $fore) {
     $lblState.ForeColor = $fore
 }
 
-# Zvýrazní ve vstupním poli řádek $line (-1 = nic nezvýrazňovat)
-function Set-LineHighlight($box, [int]$line) {
-    $box.SuspendLayout()
-    $selStart = $box.SelectionStart
-    $box.SelectAll()
-    $box.SelectionBackColor = $box.BackColor
-    $box.SelectionColor = $cText
-    $box.SelectionFont = $fontMono
-    if ($line -ge 0 -and $line -lt $box.Lines.Count) {
-        $start = $box.GetFirstCharIndexFromLine($line)
-        $len = $box.Lines[$line].Length
-        $box.Select($start, [Math]::Max($len, 0))
-        $box.SelectionBackColor = $cAccentBg
-        $box.SelectionColor = $cAccent
-        $box.SelectionFont = $fontMonoB
-        $box.Select($start, 0)
-        $box.ScrollToCaret()
-    } else {
-        $box.Select([Math]::Min($selStart, $box.TextLength), 0)
+# Odstraní z poznámek poslední řádek přesně rovný $line (při změně Vymazat -> Ponechat)
+function Remove-NoteLine([string]$line) {
+    $lines = [System.Collections.Generic.List[string]]($txtNotes.Text -split "\r?\n")
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if ($lines[$i].Trim() -eq $line) {
+            $lines.RemoveAt($i)
+            $txtNotes.Text = $lines -join "`r`n"
+            return $true
+        }
     }
-    $box.ResumeLayout()
+    return $false
 }
 
-function Update-Highlight {
-    $line = -1
-    if ($script:Index -lt $script:Items.Count) { $line = $script:Items[$script:Index].Line }
+# Po vytvoření seznamu zobrazí horní pole seznam se stavem každého řádku:
+#   ✓ = Ponechat, ✗ = Vymazat (zapsáno do poznámek), prázdné = ještě nerozhodnuto
+function Get-ListText {
+    $sb = New-Object System.Text.StringBuilder
+    for ($i = 0; $i -lt $script:Items.Count; $i++) {
+        $it = $script:Items[$i]
+        $mark = switch ($it.Status) { 'keep' { '✓' } 'del' { '✗' } default { ' ' } }
+        $line = "$mark  $($it.Value)`t$($it.Note)"
+        if ($it.Manual) { $line += '   (vloženo ručně)' }
+        if ($i -gt 0) { [void]$sb.Append("`n") }
+        [void]$sb.Append($line)
+    }
+    $sb.ToString()
+}
+
+function Update-ListBox {
+    $box = $txtInput
     $script:Highlighting = $true
-    try { Set-LineHighlight $txtInput $line } finally { $script:Highlighting = $false }
+    try {
+        $box.SuspendLayout()
+        if ($script:Items.Count -eq 0) {
+            $box.ReadOnly = $false
+            $box.SelectAll()
+            $box.SelectionBackColor = $box.BackColor
+            $box.SelectionColor = $cText
+            $box.SelectionFont = $fontMono
+            $box.Select(0, 0)
+            return
+        }
+        $box.ReadOnly = $true
+        $text = Get-ListText
+        if ($box.Text -ne $text) { $box.Text = $text }
+        $box.SelectAll()
+        $box.SelectionBackColor = $box.BackColor
+        $box.SelectionColor = $cText
+        $box.SelectionFont = $fontMono
+        $lines = $box.Lines
+        for ($i = 0; $i -lt $script:Items.Count -and $i -lt $lines.Count; $i++) {
+            $st = $script:Items[$i].Status
+            if ($st -eq '' -and $i -ne $script:Index) { continue }
+            $box.Select($box.GetFirstCharIndexFromLine($i), $lines[$i].Length)
+            if ($st -eq 'keep') { $box.SelectionColor = $cYes }
+            elseif ($st -eq 'del') { $box.SelectionColor = $cNo }
+            if ($i -eq $script:Index -and -not $script:Done) {
+                $box.SelectionBackColor = $cAccentBg
+                $box.SelectionFont = $fontMonoB
+                if ($st -eq '') { $box.SelectionColor = $cAccent }
+            }
+        }
+        $box.Select($box.GetFirstCharIndexFromLine([Math]::Min($script:Index, $script:Items.Count - 1)), 0)
+        $box.ScrollToCaret()
+    } finally {
+        $box.ResumeLayout()
+        $script:Highlighting = $false
+    }
 }
 
 function Update-View {
     $count = $script:Items.Count
-    $btnOn = ($count -gt 0 -and $script:Index -lt $count)
+    $decided = @($script:Items | Where-Object { $_.Status -ne '' }).Count
+    $btnOn = ($count -gt 0 -and -not $script:Done)
     $btnYes.Enabled = $btnOn; $btnNo.Enabled = $btnOn; $btnInsert.Enabled = $btnOn
+    $btnUp.Enabled = ($count -gt 0); $btnDown.Enabled = ($count -gt 0)
     $btnYes.BackColor = if ($btnOn) { $cYes } else { $cNeutral }
     $btnNo.BackColor  = if ($btnOn) { $cNo }  else { $cNeutral }
     $lblCurrentNote.Text = ''
@@ -433,37 +500,80 @@ function Update-View {
         $lblPos.Text = '0 / 0'
         $lblCurrent.Text = 'Vložte řádky z Excelu a klikněte na Vytvořit seznam'
         $lblCurrent.ForeColor = $cMuted
-    } elseif ($script:Index -ge $count) {
-        Set-State 'Dokončeno' $cDone ([System.Drawing.Color]::White)
+    } elseif ($script:Done) {
+        Set-State "Dokončeno  ($decided / $count)" $cDone ([System.Drawing.Color]::White)
         $lblPos.Text = "$count / $count"
-        $lblCurrent.Text = '✓ Hotovo – všechny řádky prošly'
+        $lblCurrent.Text = '✓ Hotovo – všechny řádky jsou rozhodnuté'
         $lblCurrent.ForeColor = $cDone
+        $lblCurrentNote.Text = 'Šipkami ▲ ▼ nebo kliknutím do seznamu se můžete k libovolnému řádku vrátit.'
     } else {
-        if ($script:Index -eq 0) { Set-State 'Načteno' $cAccent ([System.Drawing.Color]::White) }
-        else { Set-State 'Probíhá' (RGB 202 138 4) ([System.Drawing.Color]::White) }
+        if ($decided -eq 0) { Set-State "Načteno  (hotovo 0 / $count)" $cAccent ([System.Drawing.Color]::White) }
+        else { Set-State "Probíhá  (hotovo $decided / $count)" (RGB 202 138 4) ([System.Drawing.Color]::White) }
         $lblPos.Text = "$($script:Index + 1) / $count"
         $item = $script:Items[$script:Index]
         $lblCurrent.Text = $item.Value
         $lblCurrent.ForeColor = $cText
-        $lblCurrentNote.Text = if ($item.Note -ne '') { "Při Vymazat se zapíše: $($item.Note)" } else { 'Při Vymazat se nic nezapíše (poznámka je prázdná)' }
-        if ($item.Line -lt 0) { $lblCurrentNote.Text += '   •   vloženo ručně' }
+        $info = if ($item.Note -ne '') { "Při Vymazat se zapíše: $($item.Note)" } else { 'Při Vymazat se nic nezapíše (poznámka je prázdná)' }
+        switch ($item.Status) {
+            'keep' { $info = '✓ Ponecháno   •   ' + $info }
+            'del'  { $info = '✗ Vymazáno (zapsáno v poznámkách)   •   ' + $info }
+        }
+        if ($item.Manual) { $info += '   •   vloženo ručně' }
+        $lblCurrentNote.Text = $info
     }
-    Update-Highlight
+    Update-ListBox
 }
 
 # Zobrazí aktuální řádek a zkopíruje jeho první hodnotu do schránky
 function Show-Current {
     Update-View
-    if ($script:Index -lt $script:Items.Count) {
+    if (-not $script:Done -and $script:Index -lt $script:Items.Count) {
         $value = $script:Items[$script:Index].Value
         try { [System.Windows.Forms.Clipboard]::SetText($value) }
         catch { Show-Warn 'Hodnotu se nepodařilo zkopírovat do schránky (schránka je možná obsazená jinou aplikací).' }
     }
 }
 
-function Move-Next {
-    if ($script:Index -lt $script:Items.Count) { $script:Index++ }
+# Přejde na další nerozhodnutý řádek (hledá od aktuálního dál, pak od začátku); když žádný není, dokončeno
+function Move-NextUndecided {
+    $count = $script:Items.Count
+    for ($k = 1; $k -le $count; $k++) {
+        $i = ($script:Index + $k) % $count
+        if ($script:Items[$i].Status -eq '') {
+            $script:Index = $i
+            $script:Done = $false
+            Show-Current
+            return
+        }
+    }
+    $script:Done = $true
     Show-Current
+}
+
+# Ruční posun o $delta řádků
+function Move-By([int]$delta) {
+    $count = $script:Items.Count
+    if ($count -eq 0) { return }
+    if ($script:Done) { $script:Done = $false; $delta = 0 }
+    $script:Index = [Math]::Max(0, [Math]::Min($count - 1, $script:Index + $delta))
+    Show-Current
+}
+
+function Set-Decision([string]$status) {
+    if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
+    $item = $script:Items[$script:Index]
+    $note = $item.Note.Trim()
+    if ($status -eq 'del' -and $item.Status -ne 'del') {
+        if ($note -eq '') { Show-Warn 'Poznámka pro tento řádek je prázdná. Nic se nezapíše, pokračuje se dalším řádkem.' }
+        else { Add-NoteLine $note }
+    }
+    if ($status -eq 'keep' -and $item.Status -eq 'del' -and $note -ne '') {
+        if (-not (Remove-NoteLine $note)) {
+            Show-Warn "Řádek byl dříve vymazán, ale jeho poznámku „$note“ se v poznámkách nepodařilo najít. Zkontrolujte poznámky ručně."
+        }
+    }
+    $item.Status = $status
+    Move-NextUndecided
 }
 
 # Přidá nadpis na konec poznámek (oddělený prázdným řádkem) a vyprázdní pole nadpisu
@@ -535,6 +645,7 @@ $txtInput.Add_KeyDown({ param($s, $e)
         $e.SuppressKeyPress = $true
         $e.Handled = $true
         Invoke-Safe {
+            if ($script:Items.Count -gt 0) { Show-Warn 'Seznam už je vytvořený. Pro nové vložení ho nejdřív zrušte (Zrušit seznam).'; return }
             if (-not [System.Windows.Forms.Clipboard]::ContainsText()) { return }
             $r = Reduce-PastedColumns ([System.Windows.Forms.Clipboard]::GetText())
             if ($r.Error) { Show-Error $r.Error; return }
@@ -551,6 +662,7 @@ $btnLoad.Add_Click({ Invoke-Safe {
 
     $script:Items = $parsed.Items
     $script:Index = 0
+    $script:Done = $false
     [void](Add-Title)   # vyplněný nadpis se přidá do poznámek
     Show-Current
 } 'Seznam se nepodařilo načíst. Zkuste znovu zkopírovat data z Excelu.' })
@@ -591,18 +703,23 @@ $btnSave.Add_Click({ Invoke-Safe {
 
 $btnSaveAs.Add_Click({ Invoke-Safe { Save-NotesAs } 'Ukládání se nezdařilo.' })
 
-$btnYes.Add_Click({ Invoke-Safe { Move-Next } 'Přechod na další řádek se nezdařil.' })
+$btnYes.Add_Click({ Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' })
+$btnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.' })
+$btnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
 
-$btnNo.Add_Click({ Invoke-Safe {
-    if ($script:Index -ge $script:Items.Count) { return }
-    $note = $script:Items[$script:Index].Note.Trim()
-    if ($note -eq '') {
-        Show-Warn 'Poznámka pro tento řádek je prázdná. Nic se nezapíše, pokračuje se dalším řádkem.'
-    } else {
-        Add-NoteLine $note
+# Kliknutím na řádek v seznamu nahoře se na něj přejde
+$txtInput.Add_MouseUp({ Invoke-Safe {
+    if ($script:Items.Count -eq 0) { return }
+    if ($txtInput.SelectionLength -gt 0) { return }
+    $line = $txtInput.GetLineFromCharIndex($txtInput.SelectionStart)
+    if ($line -ge 0 -and $line -lt $script:Items.Count) {
+        $script:Index = $line
+        $script:Done = $false
+        Show-Current
     }
-    Move-Next
-} 'Zápis poznámky se nezdařil.' })
+} 'Přechod na řádek se nezdařil.' })
+
+$btnNo.Add_Click({ Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' })
 
 $btnInsert.Add_Click({ Invoke-Safe {
     if ($script:Index -ge $script:Items.Count) { return }
@@ -641,7 +758,7 @@ $btnInsert.Add_Click({ Invoke-Safe {
     $dlg.CancelButton = $cancel
 
     if ($dlg.ShowDialog($form) -eq 'OK') {
-        $script:Items.Insert($script:Index + 1, (New-Item2 $t1.Text.Trim() $t2.Text.Trim()))
+        $script:Items.Insert($script:Index + 1, (New-Item2 $t1.Text.Trim() $t2.Text.Trim() $true))
         Update-View   # aktuální řádek zůstává, mění se jen celkový počet
     }
     $dlg.Dispose()
@@ -654,8 +771,9 @@ $btnClear.Add_Click({ Invoke-Safe {
     if ($r -ne 'Yes') { return }
     $script:Items = New-Object System.Collections.Generic.List[object]
     $script:Index = 0
+    $script:Done = $false
+    Update-View          # odemkne vstupní pole
     $txtInput.Clear()
-    Update-View
 } 'Seznam se nepodařilo vymazat.' })
 
 $form.Add_Shown({
