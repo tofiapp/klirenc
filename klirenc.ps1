@@ -245,8 +245,22 @@ function New-KcBitmap([int]$size) {
     $font.Dispose(); $brush.Dispose(); $path.Dispose(); $g.Dispose()
     $bmp
 }
+# Vlastní identita procesu pro hlavní panel Windows: okno se neseskupí s ostatními okny PowerShellu
+# a na liště se zobrazí ikona KC
 try {
-    $iconBmp = New-KcBitmap 64
+    if (-not ('KcTaskbar' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class KcTaskbar {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+}
+'@
+    }
+    [void][KcTaskbar]::SetCurrentProcessExplicitAppUserModelID('KontrolaClearance.App')
+} catch { }
+try {
+    $iconBmp = New-KcBitmap 256
     $form.Icon = [System.Drawing.Icon]::FromHandle($iconBmp.GetHicon())
 } catch { }
 
@@ -325,24 +339,7 @@ $lblPos.AutoSize = $true
 $lblPos.Anchor = 'Right'
 $lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $lblPos.ForeColor = $cText
-$lblApp.Anchor = 'None'
-$lblApp.Margin = New-Object System.Windows.Forms.Padding(6, 0, 0, 0)
-$picLogo = New-Object System.Windows.Forms.PictureBox
-$picLogo.Size = New-Object System.Drawing.Size(34, 34)
-$picLogo.SizeMode = 'Zoom'
-$picLogo.Anchor = 'None'
-$picLogo.Margin = New-Object System.Windows.Forms.Padding(0)
-try { $picLogo.Image = New-KcBitmap 68 } catch { }
-$appBox = New-Object System.Windows.Forms.TableLayoutPanel
-$appBox.AutoSize = $true
-$appBox.AutoSizeMode = 'GrowAndShrink'
-$appBox.ColumnCount = 2
-$appBox.RowCount = 1
-$appBox.Anchor = 'Left'
-$appBox.Margin = New-Object System.Windows.Forms.Padding(0)
-$appBox.Controls.Add($picLogo, 0, 0)
-$appBox.Controls.Add($lblApp, 1, 0)
-$header.Controls.Add($appBox, 0, 0)
+$header.Controls.Add($lblApp, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
 $chkMiddle = New-Object System.Windows.Forms.CheckBox
 $chkMiddle.Text = 'Vkládat Ctrl + kliknutím'
