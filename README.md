@@ -18,20 +18,17 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 
 ## Použití
 
-1. Chcete-li pokračovat v dřívějších poznámkách, klikněte na **Otevřít soubor…** a vyberte `.txt`. Nové zápisy se pak přidávají na jeho konec.
-2. V Excelu označte celý rozsah řádků přes všechny sloupce (např. 25), stiskněte Ctrl+C a vložte ho do pole vlevo nahoře (Ctrl+V). Aplikace použije jen **první sloupec** (*Údaj k ověření*) a **poslední sloupec** (*Poznámka při Vymazat*). Sloupce mezi nimi se zahodí hned při vložení, takže v poli zůstanou jen tyto dva. Pod polem je vidět počet řádků a kolik sloupců mělo vložení.
-3. Případně napište **Nadpis** a klikněte na **Vytvořit seznam**. Vyplněný nadpis se přidá na konec poznámek. Prázdné řádky se přeskočí. Seznam se nevytvoří a dosavadní seznam zůstane beze změny, když:
-   - některý řádek má jen jeden sloupec,
-   - řádky mají různý počet sloupců,
-   - první sloupec je prázdný.
-4. Po vytvoření se v horním poli zobrazí seznam. U každého řádku je vidět stav: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později, bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný. Jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
+1. Chcete-li pokračovat v dřívějších poznámkách, klikněte na **Otevřít soubor…** a vyberte `.txt`. Jeho název se zobrazí v poli **Název souboru** a nové zápisy se přidávají na konec.
+2. V Excelu označte celý rozsah řádků přes všechny sloupce, stiskněte Ctrl+C a vložte ho do pole vlevo nahoře (Ctrl+V). Aplikace si ponechá jen **první sloupec** (*Údaj k ověření*) a **poslední sloupec** (*poznámka*), ostatní se zahodí hned při vložení.
+3. Klikněte na **Vytvořit seznam**. Prázdné řádky se přeskočí. Seznam se nevytvoří a dosavadní seznam zůstane beze změny, když některý řádek má jen jeden sloupec nebo prázdný první sloupec.
+4. V horním poli se zobrazí seznam se stavem každého řádku: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později, bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný, jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
    - **Ponechat** označí řádek ✓.
-   - **Vymazat** zapíše poznámku (poslední sloupec) a označí řádek ✗. Prázdnou poznámku nezapíše, jen upozorní.
-   - Malé tlačítko **? Vrátit se později** označí řádek ?. Pokud měl řádek dřív ✗, jeho poznámka se odebere.
-   - Po rozhodnutí se automaticky přejde na **další nerozhodnutý** řádek. Řádky s ? přijdou na řadu, až nezbude žádný nerozhodnutý.
-   - Šipkami **▲ ▼**, kliknutím na řádek v horním seznamu nebo klávesami ↑ ↓ v tomto seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku z poznámek odebere.
-   - Dokud je seznam vytvořený, horní pole nejde upravovat. Nová data vložíte až po **Zrušit seznam**.
-5. Další nadpis do stejných poznámek přidáte kdykoli tlačítkem **+ Přidat nadpis**.
-6. **Vložit mezi** přidá nový záznam hned za aktuální řádek. Aktuální řádek se nezmění.
-7. **Zrušit seznam** (s potvrzením) smaže seznam, pozici a vstupní pole. Nadpis a poznámky zůstanou.
-8. **Uložit** uloží poznámky do otevřeného (nebo naposledy uloženého) souboru. **Uložit jako…** se zeptá na nový soubor. Ukládá se jako UTF-8 `.txt` a v aplikaci se nic nemaže.
+   - **Vymazat** zapíše poznámku a označí řádek ✗. Prázdnou poznámku nezapíše, jen upozorní.
+   - **? Vrátit se později** označí řádek ?. Takové řádky přijdou na řadu, až nezbude žádný nerozhodnutý.
+   - Po rozhodnutí se automaticky přejde na další nerozhodnutý řádek.
+   - Šipkami **▲ ▼**, kliknutím na řádek v horním seznamu nebo klávesami ↑ ↓ v tomto seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku odebere.
+5. **+ Vložit mezi** přidá nový záznam hned za aktuální řádek. Aktuální řádek se nezmění.
+6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
+7. Ukládání (vždy UTF-8 `.txt`, v aplikaci se nic nemaže):
+   - **Uložit** zapíše do otevřeného souboru. Pokud jste v poli **Název souboru** změnili název, soubor se ve stejné složce **přejmenuje**.
+   - **Uložit jako…** se zeptá na nové umístění. Původní soubor zůstane.
