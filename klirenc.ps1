@@ -9,6 +9,7 @@ Add-Type -AssemblyName System.Drawing
 $script:Items = New-Object System.Collections.Generic.List[object]
 $script:Index = 0
 $script:Highlighting = $false
+$script:Syncing = $false       # programové nastavení výběru v seznamu (neřešit jako klik)
 $script:Done = $false          # všechny řádky rozhodnuty a zobrazuje se dokončení
 $script:PastedCols = 0      # kolik sloupců mělo poslední vložení (před ořezáním)
 $script:NotesFile = $null   # soubor, do kterého se poznámky ukládají (po Otevřít / Uložit jako)
@@ -161,8 +162,9 @@ function New-Button([string]$text, $back, $fore) {
     $b.Text = $text
     $b.AutoSize = $true
     $b.Height = 36
+    $b.MinimumSize = New-Object System.Drawing.Size(0, 36)
     $b.Padding = New-Object System.Windows.Forms.Padding(12, 2, 12, 2)
-    $b.Margin = New-Object System.Windows.Forms.Padding(0, 3, 8, 3)
+    $b.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 6)
     Set-FlatButton $b $back $fore
     Set-Rounded $b 8
     $b
@@ -226,10 +228,11 @@ $header = New-Object System.Windows.Forms.TableLayoutPanel
 $header.Dock = 'Top'
 $header.Height = 60
 $header.BackColor = $cHeader
-$header.ColumnCount = 3
+$header.ColumnCount = 4
 $header.Padding = New-Object System.Windows.Forms.Padding(16, 0, 16, 0)
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
+[void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 $lblApp = New-Object System.Windows.Forms.Label
 $lblApp.Text = '◆ klirenc'
@@ -251,7 +254,15 @@ $lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $lblPos.ForeColor = $cText
 $header.Controls.Add($lblApp, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
-$header.Controls.Add($lblPos, 2, 0)
+$chkMiddle = New-Object System.Windows.Forms.CheckBox
+$chkMiddle.Text = 'Vkládat dvojklikem kolečka'
+$chkMiddle.AutoSize = $true
+$chkMiddle.Anchor = 'Right'
+$chkMiddle.Checked = $true
+$chkMiddle.ForeColor = $cMuted
+$chkMiddle.Margin = New-Object System.Windows.Forms.Padding(0, 0, 24, 0)
+$header.Controls.Add($chkMiddle, 2, 0)
+$header.Controls.Add($lblPos, 3, 0)
 
 $split = New-Object System.Windows.Forms.SplitContainer
 $split.Dock = 'Fill'
@@ -275,7 +286,7 @@ $left.RowCount = 4
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # import
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # aktuální hodnota
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 88)))   # Ponechat / Vymazat
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 48)))   # vedlejší akce
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))       # vedlejší akce
 $split.Panel1.Controls.Add($left)
 
 # Import: jedno pole, do kterého se vloží řádky z Excelu (použije se 1. a poslední sloupec)
@@ -287,7 +298,7 @@ $importGrid.Dock = 'Fill'
 $importGrid.ColumnCount = 1
 $importGrid.RowCount = 2
 [void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
-[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 46)))
+[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
 $importCard.Inner.Controls.Add($importGrid)
 
 # RichTextBox kvůli zvýraznění aktuálního řádku
@@ -304,6 +315,8 @@ $txtInput.BackColor = $cInput
 
 $importPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $importPanel.Dock = 'Fill'
+$importPanel.AutoSize = $true
+$importPanel.AutoSizeMode = 'GrowAndShrink'
 $importPanel.WrapContents = $false
 $importPanel.Padding = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
 $btnLoad = New-Button 'Vytvořit seznam' $cAccent $cWhite
@@ -315,7 +328,22 @@ $lblCount.Padding = New-Object System.Windows.Forms.Padding(8, 9, 0, 0)
 $lblCount.Font = $fontState
 $lblCount.Text = 'Řádků: 0'
 $importPanel.Controls.AddRange(@($btnLoad, $btnClear, $lblCount))
-$importGrid.Controls.Add($txtInput, 0, 0)
+# Seznam řádků se stavem (zobrazí se místo vstupního pole po Vytvořit seznam)
+$lstItems = New-Object System.Windows.Forms.ListBox
+$lstItems.Dock = 'Fill'
+$lstItems.DrawMode = 'OwnerDrawFixed'
+$lstItems.ItemHeight = 28
+$lstItems.IntegralHeight = $false
+$lstItems.BorderStyle = 'None'
+$lstItems.BackColor = $cInput
+$lstItems.Font = $fontBase
+$lstItems.Visible = $false
+$inputHost = New-Object System.Windows.Forms.Panel
+$inputHost.Dock = 'Fill'
+$inputHost.Margin = New-Object System.Windows.Forms.Padding(0)
+$inputHost.Controls.Add($txtInput)
+$inputHost.Controls.Add($lstItems)
+$importGrid.Controls.Add($inputHost, 0, 0)
 $importGrid.Controls.Add($importPanel, 0, 1)
 
 # Aktuální hodnota: horní lišta (popisek + šipky), velká hodnota, dole info o poznámce
@@ -385,6 +413,8 @@ $left.Controls.Add($actionPanel, 0, 2)
 # Vedlejší akce: malá tlačítka uprostřed pod hlavními
 $secondaryPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $secondaryPanel.Dock = 'Fill'
+$secondaryPanel.AutoSize = $true
+$secondaryPanel.AutoSizeMode = 'GrowAndShrink'
 $secondaryPanel.ColumnCount = 4
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
@@ -408,10 +438,10 @@ $right.Dock = 'Fill'
 $right.ColumnCount = 1
 $right.RowCount = 5
 [void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 26)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 40)))
+[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
 [void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 30)))
 [void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 46)))
+[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
 $notesCard.Inner.Controls.Add($right)
 
 $lblTitle = New-Object System.Windows.Forms.Label
@@ -420,6 +450,8 @@ $lblTitle.Dock = 'Fill'
 $lblTitle.Font = $fontHead
 $titleRow = New-Object System.Windows.Forms.TableLayoutPanel
 $titleRow.Dock = 'Fill'
+$titleRow.AutoSize = $true
+$titleRow.AutoSizeMode = 'GrowAndShrink'
 $titleRow.ColumnCount = 2
 [void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
 [void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
@@ -450,6 +482,8 @@ $txtNotes.BorderStyle = 'None'
 $txtNotes.BackColor = $cInput
 $saveRow = New-Object System.Windows.Forms.FlowLayoutPanel
 $saveRow.Dock = 'Fill'
+$saveRow.AutoSize = $true
+$saveRow.AutoSizeMode = 'GrowAndShrink'
 $saveRow.WrapContents = $false
 $saveRow.Padding = New-Object System.Windows.Forms.Padding(0, 6, 0, 0)
 $btnOpen = New-GhostButton 'Otevřít soubor…'
@@ -490,62 +524,81 @@ function Remove-NoteLine([string]$line) {
     return $false
 }
 
-# Po vytvoření seznamu zobrazí horní pole seznam se stavem každého řádku:
-#   ✓ = Ponechat, ✗ = Vymazat (zapsáno do poznámek), ? = vrátit se později, prázdné = ještě nerozhodnuto
-function Get-ListText {
-    $sb = New-Object System.Text.StringBuilder
-    for ($i = 0; $i -lt $script:Items.Count; $i++) {
-        $it = $script:Items[$i]
-        $mark = switch ($it.Status) { 'keep' { '✓' } 'del' { '✗' } 'unsure' { '?' } default { ' ' } }
-        $line = "$mark  $($it.Value)`t$($it.Note)"
-        if ($it.Manual) { $line += '   (vloženo ručně)' }
-        if ($i -gt 0) { [void]$sb.Append("`n") }
-        [void]$sb.Append($line)
-    }
-    $sb.ToString()
-}
-
-function Update-ListBox {
-    $box = $txtInput
-    $script:Highlighting = $true
+# Vykreslení jednoho řádku seznamu: číslo, značka stavu, údaj, poznámka
+#   ✓ = Ponechat, ✗ = Vymazat (zapsáno do poznámek), ? = vrátit se později, bez značky = nerozhodnuto
+$lstItems.Add_DrawItem({ param($s, $e)
     try {
-        $box.SuspendLayout()
-        if ($script:Items.Count -eq 0) {
-            $box.ReadOnly = $false
-            $box.SelectAll()
-            $box.SelectionBackColor = $box.BackColor
-            $box.SelectionColor = $cText
-            $box.SelectionFont = $fontMono
-            $box.Select(0, 0)
-            return
+        if ($e.Index -lt 0 -or $e.Index -ge $script:Items.Count) { return }
+        $it = $script:Items[$e.Index]
+        $g = $e.Graphics
+        $r = $e.Bounds
+        $isCur = ($e.Index -eq $script:Index -and -not $script:Done)
+        $back = if ($isCur) { $cAccentBg } else { $cInput }
+        $bb = New-Object System.Drawing.SolidBrush($back)
+        $g.FillRectangle($bb, $r)
+        $bb.Dispose()
+        if ($isCur) {
+            $ab = New-Object System.Drawing.SolidBrush($cAccent)
+            $g.FillRectangle($ab, $r.X, $r.Y, 4, $r.Height)
+            $ab.Dispose()
         }
-        $box.ReadOnly = $true
-        $text = Get-ListText
-        if ($box.Text -ne $text) { $box.Text = $text }
-        $box.SelectAll()
-        $box.SelectionBackColor = $box.BackColor
-        $box.SelectionColor = $cText
-        $box.SelectionFont = $fontMono
-        $lines = $box.Lines
-        for ($i = 0; $i -lt $script:Items.Count -and $i -lt $lines.Count; $i++) {
-            $st = $script:Items[$i].Status
-            if ($st -eq '' -and $i -ne $script:Index) { continue }
-            $box.Select($box.GetFirstCharIndexFromLine($i), $lines[$i].Length)
-            if ($st -eq 'keep') { $box.SelectionColor = $cYes }
-            elseif ($st -eq 'del') { $box.SelectionColor = $cNo }
-            elseif ($st -eq 'unsure') { $box.SelectionColor = $cUnsure }
-            if ($i -eq $script:Index -and -not $script:Done) {
-                $box.SelectionBackColor = $cAccentBg
-                $box.SelectionFont = $fontMonoB
-                if ($st -eq '') { $box.SelectionColor = $cAccent }
-            }
+        $flags = [System.Windows.Forms.TextFormatFlags]'VerticalCenter, EndEllipsis, NoPrefix, SingleLine'
+        $mark = ''; $markColor = $cMuted
+        switch ($it.Status) {
+            'keep'   { $mark = '✓'; $markColor = $cYes }
+            'del'    { $mark = '✗'; $markColor = $cNo }
+            'unsure' { $mark = '?'; $markColor = $cUnsure }
         }
-        $box.Select($box.GetFirstCharIndexFromLine([Math]::Min($script:Index, $script:Items.Count - 1)), 0)
-        $box.ScrollToCaret()
-    } finally {
-        $box.ResumeLayout()
-        $script:Highlighting = $false
+        $wRest = [Math]::Max(10, $r.Width - 80)
+        $wVal = [int]($wRest * 0.45)
+        $numRect  = New-Object System.Drawing.Rectangle(($r.X + 8), $r.Y, 40, $r.Height)
+        $markRect = New-Object System.Drawing.Rectangle(($r.X + 48), $r.Y, 24, $r.Height)
+        $valRect  = New-Object System.Drawing.Rectangle(($r.X + 76), $r.Y, $wVal, $r.Height)
+        $noteRect = New-Object System.Drawing.Rectangle(($r.X + 84 + $wVal), $r.Y, ($wRest - $wVal - 8), $r.Height)
+        [System.Windows.Forms.TextRenderer]::DrawText($g, "$($e.Index + 1)", $fontSmall, $numRect, $cMuted, $flags)
+        [System.Windows.Forms.TextRenderer]::DrawText($g, $mark, $fontState, $markRect, $markColor, $flags)
+        $valFont = if ($isCur) { $fontHead } else { $fontBase }
+        $valColor = if ($isCur) { $cAccent } else { $cText }
+        [System.Windows.Forms.TextRenderer]::DrawText($g, $it.Value, $valFont, $valRect, $valColor, $flags)
+        $note = $it.Note
+        if ($it.Manual) { $note = "$note   (vloženo ručně)" }
+        [System.Windows.Forms.TextRenderer]::DrawText($g, $note, $fontSmall, $noteRect, $cMuted, $flags)
+    } catch { }
+})
+
+# Kliknutí nebo šipky v seznamu: vybraný řádek se stane aktuálním
+$lstItems.Add_SelectedIndexChanged({
+    if ($script:Syncing) { return }
+    Invoke-Safe {
+        $i = $lstItems.SelectedIndex
+        if ($i -ge 0 -and $i -lt $script:Items.Count) {
+            $script:Index = $i
+            $script:Done = $false
+            Show-Current
+        }
+    } 'Přechod na řádek se nezdařil.'
+})
+
+# Seznam místo vstupního pole (bez seznamu se zobrazí vstupní pole)
+function Update-ListBox {
+    if ($script:Items.Count -eq 0) {
+        $lstItems.Visible = $false
+        $txtInput.Visible = $true
+        return
     }
+    $script:Syncing = $true
+    try {
+        $lstItems.BeginUpdate()
+        if ($lstItems.Items.Count -ne $script:Items.Count) {
+            $lstItems.Items.Clear()
+            for ($i = 0; $i -lt $script:Items.Count; $i++) { [void]$lstItems.Items.Add($i) }
+        }
+        $lstItems.SelectedIndex = if ($script:Done) { -1 } else { $script:Index }
+        $lstItems.EndUpdate()
+        $lstItems.Invalidate()
+        $txtInput.Visible = $false
+        $lstItems.Visible = $true
+    } finally { $script:Syncing = $false }
 }
 
 function Update-View {
@@ -783,29 +836,6 @@ $btnYes.Add_Click({ Invoke-Safe { Set-Decision 'keep' } 'Přechod na další ř�
 $btnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.' })
 $btnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
 
-# Kliknutím na řádek v seznamu nahoře se na něj přejde
-$txtInput.Add_MouseUp({ Invoke-Safe {
-    if ($script:Items.Count -eq 0) { return }
-    if ($txtInput.SelectionLength -gt 0) { return }
-    $line = $txtInput.GetLineFromCharIndex($txtInput.SelectionStart)
-    if ($line -ge 0 -and $line -lt $script:Items.Count) {
-        $script:Index = $line
-        $script:Done = $false
-        Show-Current
-    }
-} 'Přechod na řádek se nezdařil.' })
-
-# Šipky na klávesnici v horním seznamu přepínají řádky
-$txtInput.Add_KeyDown({ param($s, $e)
-    if ($script:Items.Count -eq 0) { return }
-    $delta = switch ($e.KeyCode) { 'Up' { -1 } 'Down' { 1 } 'PageUp' { -10 } 'PageDown' { 10 } default { 0 } }
-    if ($delta -ne 0) {
-        $e.Handled = $true
-        $e.SuppressKeyPress = $true
-        Invoke-Safe { Move-By $delta } 'Přechod na řádek se nezdařil.'
-    }
-})
-
 $btnNo.Add_Click({ Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' })
 $btnUnsure.Add_Click({ Invoke-Safe { Set-Decision 'unsure' } 'Označení se nezdařilo.' })
 
@@ -864,6 +894,117 @@ $btnClear.Add_Click({ Invoke-Safe {
     $txtInput.Clear()
 } 'Seznam se nepodařilo vymazat.' })
 
+# ---------- Vkládání dvojklikem kolečka myši do jiné aplikace ----------
+# Globální sledování myši (funkce Windows, bez instalace). Při dvojkliku prostředním tlačítkem
+# v jiném okně než klirenc se do něj vloží aktuální údaj (Ctrl+V).
+$script:MiddleHookOk = $false
+try {
+    if (-not ('KlirencMiddleClick' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class KlirencMiddleClick {
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT { public int x; public int y; public uint mouseData; public uint flags; public uint time; public IntPtr extra; }
+
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
+    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string name);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_MBUTTONUP = 0x0208;
+
+    private static HookProc proc = Callback;   // drží delegáta, aby ho neuklidil GC
+    private static IntPtr hook = IntPtr.Zero;
+    private static uint lastTime = 0;
+    private static int lastX, lastY;
+    private static bool armed = false;
+
+    public static volatile bool Pending = false;
+    public static volatile bool Enabled = true;
+
+    public static bool Start() {
+        if (hook != IntPtr.Zero) return true;
+        using (Process p = Process.GetCurrentProcess())
+        using (ProcessModule m = p.MainModule) {
+            hook = SetWindowsHookEx(WH_MOUSE_LL, proc, GetModuleHandle(m.ModuleName), 0);
+        }
+        return hook != IntPtr.Zero;
+    }
+
+    public static void Stop() {
+        if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+    }
+
+    private static bool ForegroundIsOther() {
+        uint pid;
+        GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        return pid != (uint)Process.GetCurrentProcess().Id;
+    }
+
+    private static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam) {
+        try {
+            if (nCode >= 0 && Enabled) {
+                int msg = wParam.ToInt32();
+                if (msg == WM_MBUTTONDOWN) {
+                    MSLLHOOKSTRUCT info = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                    uint dt = info.time - lastTime;
+                    bool near = Math.Abs(info.x - lastX) <= GetSystemMetrics(36) && Math.Abs(info.y - lastY) <= GetSystemMetrics(37);
+                    if (lastTime != 0 && dt <= GetDoubleClickTime() && near) {
+                        armed = true;
+                        lastTime = 0;
+                    } else {
+                        lastTime = info.time; lastX = info.x; lastY = info.y;
+                    }
+                } else if (msg == WM_MBUTTONUP && armed) {
+                    armed = false;
+                    if (ForegroundIsOther()) Pending = true;
+                }
+            }
+        } catch { }
+        return CallNextHookEx(hook, nCode, wParam, lParam);
+    }
+}
+'@
+    }
+    $script:MiddleHookOk = [KlirencMiddleClick]::Start()
+} catch {
+    $script:MiddleHookOk = $false
+}
+if (-not $script:MiddleHookOk) {
+    $chkMiddle.Checked = $false
+    $chkMiddle.Enabled = $false
+    $chkMiddle.Text = 'Vkládání kolečkem není na tomto počítači dostupné'
+}
+
+$chkMiddle.Add_CheckedChanged({
+    if ($script:MiddleHookOk) { [KlirencMiddleClick]::Enabled = $chkMiddle.Checked }
+})
+
+# Po dvojkliku kolečkem: do schránky dát aktuální údaj a poslat Ctrl+V do okna, kde se kliklo
+$middleTimer = New-Object System.Windows.Forms.Timer
+$middleTimer.Interval = 40
+$middleTimer.Add_Tick({
+    try {
+        if (-not $script:MiddleHookOk -or -not [KlirencMiddleClick]::Pending) { return }
+        [KlirencMiddleClick]::Pending = $false
+        if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
+        [System.Windows.Forms.Clipboard]::SetText($script:Items[$script:Index].Value)
+        [System.Windows.Forms.SendKeys]::SendWait('^v')
+    } catch { }
+})
+if ($script:MiddleHookOk) { $middleTimer.Start() }
+
 $form.Add_Shown({
     $split.SplitterDistance = [int]($form.ClientSize.Width * 0.6)
     Update-NotesCaption
@@ -875,5 +1016,6 @@ try {
 } catch {
     Show-Error 'Aplikace narazila na neočekávaný problém a bude ukončena.'
 } finally {
+    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencMiddleClick]::Stop() } } catch { }
     $form.Dispose()
 }
