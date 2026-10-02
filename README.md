@@ -25,7 +25,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - **1. sloupec** = složka (kategorie),
    - **10. sloupec** = *Údaj k ověření*,
    - **poslední sloupec** = poznámka při Vymazat.
-3. Klikněte na **Vytvořit seznam**. Záznamy se roztřídí do **složek** podle 1. sloupce. Kliknutím na záhlaví složky ji sbalíte nebo rozbalíte. U každé složky je vidět, kolik záznamů je hotovo.
+3. Klikněte na **Vytvořit seznam**. Záznamy se roztřídí do **složek** podle 1. sloupce. Složky jsou seřazené podle data RRMMDD od nejstarší, složky bez data jsou na konci. Kliknutím na záhlaví složky ji sbalíte nebo rozbalíte. U každé složky je vidět, kolik záznamů je hotovo.
 4. Místo vstupního pole se zobrazí seznam s číslem a stavem každého řádku: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později, bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný, jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
    - **Ponechat** označí řádek ✓.
    - **Vymazat** zapíše poznámku a označí řádek ✗. Prázdnou poznámku nezapíše, jen upozorní.
