@@ -23,7 +23,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - se počty řádků liší,
    - některý řádek má poznámku, ale prázdný údaj,
    - pole obsahuje víc sloupců.
-4. Aktuální hodnota se zobrazí velkým písmem a automaticky se zkopíruje do schránky.
+4. Aktuální hodnota se zobrazí velkým písmem a automaticky se zkopíruje do schránky. Ve vstupních polích nahoře je zvýrazněný řádek, který je právě na řadě. Pod hodnotou je vidět, co se zapíše při NE.
    - **ANO** přejde na další řádek.
    - **NE** zapíše do poznámek druhý sloupec a přejde dál. Prázdnou poznámku nezapíše, jen upozorní.
 5. **Vložit mezi** přidá nový záznam hned za aktuální řádek. Aktuální řádek se nezmění.
