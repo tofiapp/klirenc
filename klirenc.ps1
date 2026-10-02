@@ -228,10 +228,11 @@ $header = New-Object System.Windows.Forms.TableLayoutPanel
 $header.Dock = 'Top'
 $header.Height = 60
 $header.BackColor = $cHeader
-$header.ColumnCount = 3
+$header.ColumnCount = 4
 $header.Padding = New-Object System.Windows.Forms.Padding(16, 0, 16, 0)
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
+[void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 $lblApp = New-Object System.Windows.Forms.Label
 $lblApp.Text = '◆ klirenc'
@@ -253,7 +254,15 @@ $lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $lblPos.ForeColor = $cText
 $header.Controls.Add($lblApp, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
-$header.Controls.Add($lblPos, 2, 0)
+$chkMiddle = New-Object System.Windows.Forms.CheckBox
+$chkMiddle.Text = 'Vkládat dvojklikem kolečka'
+$chkMiddle.AutoSize = $true
+$chkMiddle.Anchor = 'Right'
+$chkMiddle.Checked = $true
+$chkMiddle.ForeColor = $cMuted
+$chkMiddle.Margin = New-Object System.Windows.Forms.Padding(0, 0, 24, 0)
+$header.Controls.Add($chkMiddle, 2, 0)
+$header.Controls.Add($lblPos, 3, 0)
 
 $split = New-Object System.Windows.Forms.SplitContainer
 $split.Dock = 'Fill'
@@ -885,6 +894,117 @@ $btnClear.Add_Click({ Invoke-Safe {
     $txtInput.Clear()
 } 'Seznam se nepodařilo vymazat.' })
 
+# ---------- Vkládání dvojklikem kolečka myši do jiné aplikace ----------
+# Globální sledování myši (funkce Windows, bez instalace). Při dvojkliku prostředním tlačítkem
+# v jiném okně než klirenc se do něj vloží aktuální údaj (Ctrl+V).
+$script:MiddleHookOk = $false
+try {
+    if (-not ('KlirencMiddleClick' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class KlirencMiddleClick {
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT { public int x; public int y; public uint mouseData; public uint flags; public uint time; public IntPtr extra; }
+
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
+    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string name);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_MBUTTONUP = 0x0208;
+
+    private static HookProc proc = Callback;   // drží delegáta, aby ho neuklidil GC
+    private static IntPtr hook = IntPtr.Zero;
+    private static uint lastTime = 0;
+    private static int lastX, lastY;
+    private static bool armed = false;
+
+    public static volatile bool Pending = false;
+    public static volatile bool Enabled = true;
+
+    public static bool Start() {
+        if (hook != IntPtr.Zero) return true;
+        using (Process p = Process.GetCurrentProcess())
+        using (ProcessModule m = p.MainModule) {
+            hook = SetWindowsHookEx(WH_MOUSE_LL, proc, GetModuleHandle(m.ModuleName), 0);
+        }
+        return hook != IntPtr.Zero;
+    }
+
+    public static void Stop() {
+        if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+    }
+
+    private static bool ForegroundIsOther() {
+        uint pid;
+        GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        return pid != (uint)Process.GetCurrentProcess().Id;
+    }
+
+    private static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam) {
+        try {
+            if (nCode >= 0 && Enabled) {
+                int msg = wParam.ToInt32();
+                if (msg == WM_MBUTTONDOWN) {
+                    MSLLHOOKSTRUCT info = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                    uint dt = info.time - lastTime;
+                    bool near = Math.Abs(info.x - lastX) <= GetSystemMetrics(36) && Math.Abs(info.y - lastY) <= GetSystemMetrics(37);
+                    if (lastTime != 0 && dt <= GetDoubleClickTime() && near) {
+                        armed = true;
+                        lastTime = 0;
+                    } else {
+                        lastTime = info.time; lastX = info.x; lastY = info.y;
+                    }
+                } else if (msg == WM_MBUTTONUP && armed) {
+                    armed = false;
+                    if (ForegroundIsOther()) Pending = true;
+                }
+            }
+        } catch { }
+        return CallNextHookEx(hook, nCode, wParam, lParam);
+    }
+}
+'@
+    }
+    $script:MiddleHookOk = [KlirencMiddleClick]::Start()
+} catch {
+    $script:MiddleHookOk = $false
+}
+if (-not $script:MiddleHookOk) {
+    $chkMiddle.Checked = $false
+    $chkMiddle.Enabled = $false
+    $chkMiddle.Text = 'Vkládání kolečkem není na tomto počítači dostupné'
+}
+
+$chkMiddle.Add_CheckedChanged({
+    if ($script:MiddleHookOk) { [KlirencMiddleClick]::Enabled = $chkMiddle.Checked }
+})
+
+# Po dvojkliku kolečkem: do schránky dát aktuální údaj a poslat Ctrl+V do okna, kde se kliklo
+$middleTimer = New-Object System.Windows.Forms.Timer
+$middleTimer.Interval = 40
+$middleTimer.Add_Tick({
+    try {
+        if (-not $script:MiddleHookOk -or -not [KlirencMiddleClick]::Pending) { return }
+        [KlirencMiddleClick]::Pending = $false
+        if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
+        [System.Windows.Forms.Clipboard]::SetText($script:Items[$script:Index].Value)
+        [System.Windows.Forms.SendKeys]::SendWait('^v')
+    } catch { }
+})
+if ($script:MiddleHookOk) { $middleTimer.Start() }
+
 $form.Add_Shown({
     $split.SplitterDistance = [int]($form.ClientSize.Width * 0.6)
     Update-NotesCaption
@@ -896,5 +1016,6 @@ try {
 } catch {
     Show-Error 'Aplikace narazila na neočekávaný problém a bude ukončena.'
 } finally {
+    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencMiddleClick]::Stop() } } catch { }
     $form.Dispose()
 }
