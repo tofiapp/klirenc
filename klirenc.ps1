@@ -899,13 +899,13 @@ $btnClear.Add_Click({ Invoke-Safe {
 # v jiném okně než klirenc se do něj vloží aktuální údaj (Ctrl+V).
 $script:MiddleHookOk = $false
 try {
-    if (-not ('KlirencMiddleClick2' -as [type])) {
+    if (-not ('KlirencMiddleClick3' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-public static class KlirencMiddleClick2 {
+public static class KlirencMiddleClick3 {
     private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -922,13 +922,27 @@ public static class KlirencMiddleClick2 {
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 
     // Ctrl+V přes virtuální klávesy - nezávisí na rozložení klávesnice (SendKeys s českou klávesnicí zlobí)
-    public static void Paste() {
-        const byte VK_CONTROL = 0x11, VK_V = 0x56;
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+
+    private static void CtrlKey(byte vk) {
+        const byte VK_CONTROL = 0x11;
         const uint KEYUP = 0x0002;
         keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
-        keybd_event(VK_V, 0, 0, UIntPtr.Zero);
-        keybd_event(VK_V, 0, KEYUP, UIntPtr.Zero);
+        keybd_event(vk, 0, 0, UIntPtr.Zero);
+        keybd_event(vk, 0, KEYUP, UIntPtr.Zero);
         keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
+    }
+
+    // Kliknutí levým tlačítkem na místo kurzoru (prostřední tlačítko pole většinou neaktivuje),
+    // označení obsahu pole (Ctrl+A) a vložení (Ctrl+V) - obsah pole se nahradí
+    public static void ClickSelectAllPaste() {
+        const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
+        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(80);
+        CtrlKey(0x41);   // A
+        System.Threading.Thread.Sleep(30);
+        CtrlKey(0x56);   // V
     }
 
     private const int WH_MOUSE_LL = 14;
@@ -988,7 +1002,7 @@ public static class KlirencMiddleClick2 {
 }
 '@
     }
-    $script:MiddleHookOk = [KlirencMiddleClick2]::Start()
+    $script:MiddleHookOk = [KlirencMiddleClick3]::Start()
 } catch {
     $script:MiddleHookOk = $false
 }
@@ -999,7 +1013,7 @@ if (-not $script:MiddleHookOk) {
 }
 
 $chkMiddle.Add_CheckedChanged({
-    if ($script:MiddleHookOk) { [KlirencMiddleClick2]::Enabled = $chkMiddle.Checked }
+    if ($script:MiddleHookOk) { [KlirencMiddleClick3]::Enabled = $chkMiddle.Checked }
 })
 
 # Po dvojkliku kolečkem: do schránky dát aktuální údaj a poslat Ctrl+V do okna, kde se kliklo
@@ -1007,12 +1021,12 @@ $middleTimer = New-Object System.Windows.Forms.Timer
 $middleTimer.Interval = 40
 $middleTimer.Add_Tick({
     try {
-        if (-not $script:MiddleHookOk -or -not [KlirencMiddleClick2]::Pending) { return }
-        [KlirencMiddleClick2]::Pending = $false
+        if (-not $script:MiddleHookOk -or -not [KlirencMiddleClick3]::Pending) { return }
+        [KlirencMiddleClick3]::Pending = $false
         if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
         [System.Windows.Forms.Clipboard]::SetDataObject($script:Items[$script:Index].Value, $true, 5, 50)
         Start-Sleep -Milliseconds 60
-        [KlirencMiddleClick2]::Paste()
+        [KlirencMiddleClick3]::ClickSelectAllPaste()
     } catch { }
 })
 if ($script:MiddleHookOk) { $middleTimer.Start() }
@@ -1028,6 +1042,6 @@ try {
 } catch {
     Show-Error 'Aplikace narazila na neočekávaný problém a bude ukončena.'
 } finally {
-    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencMiddleClick2]::Stop() } } catch { }
+    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencMiddleClick3]::Stop() } } catch { }
     $form.Dispose()
 }
