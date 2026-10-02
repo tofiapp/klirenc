@@ -211,8 +211,8 @@ $cCard      = RGB 255 255 255   # karty
 $cBorder    = RGB 226 232 240
 $cText      = RGB 15 23 42
 $cMuted     = RGB 100 116 139
-$cAccent    = RGB 79 70 229     # indigo
-$cAccentBg  = RGB 238 242 255   # zvýraznění aktuálního řádku
+$cAccent    = RGB 14 116 144    # petrolejová (tyrkysově modrá)
+$cAccentBg  = RGB 224 247 250   # zvýraznění aktuálního řádku
 $cHeader    = RGB 255 255 255
 $cYes       = RGB 22 163 74
 $cNo        = RGB 225 29 72
@@ -323,7 +323,7 @@ function New-KcBitmap([int]$size) {
     $path.AddArc(0, $w - $d, $d, $d, 90, 90)
     $path.CloseFigure()
     $rect = New-Object System.Drawing.Rectangle(0, 0, $size, $size)
-    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (RGB 99 102 241), (RGB 67 56 202), 45.0)
+    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (RGB 8 145 178), (RGB 22 78 99), 45.0)
     $g.FillPath($brush, $path)
     $font = New-Object System.Drawing.Font('Segoe UI', [float]($size * 0.40), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
     $fmt = New-Object System.Drawing.StringFormat
