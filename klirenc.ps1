@@ -9,6 +9,7 @@ Add-Type -AssemblyName System.Drawing
 $script:Items = New-Object System.Collections.Generic.List[object]
 $script:Index = 0
 $script:Highlighting = $false
+$script:PastedCols = 0      # kolik sloupců mělo poslední vložení (před ořezáním)
 $script:NotesFile = $null   # soubor, do kterého se poznámky ukládají (po Otevřít / Uložit jako)
 
 # Line = číslo řádku ve vstupním poli (-1 u záznamů přidaných přes Vložit mezi)
@@ -32,6 +33,26 @@ function Get-ColumnLines([string]$text) {
     $lines = [System.Collections.Generic.List[string]]($text -split "\r\n|\n|\r")
     while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[$lines.Count - 1])) { $lines.RemoveAt($lines.Count - 1) }
     return ,$lines.ToArray()
+}
+
+# Ze vloženého textu ponechá v každém řádku jen první a poslední sloupec (prostřední zahodí hned při vložení).
+# Vrací @{ Text; Columns } nebo @{ Error } při nestejném počtu sloupců.
+function Reduce-PastedColumns([string]$text) {
+    $lines = $text -split "\r\n|\n|\r"
+    $columns = 0
+    $out = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ([string]::IsNullOrWhiteSpace($line.Replace("`t", ''))) { $out.Add(''); continue }
+        $parts = $line.Split("`t")
+        if ($columns -eq 0) { $columns = $parts.Count }
+        elseif ($parts.Count -ne $columns) {
+            return @{ Error = "Řádek $($i + 1) má $($parts.Count) sloupců, ale předchozí řádky mají $columns.`nZkopírujte z Excelu souvislý obdélníkový rozsah. Nic nebylo vloženo." }
+        }
+        if ($parts.Count -ge 2) { $out.Add($parts[0] + "`t" + $parts[$parts.Count - 1]) } else { $out.Add($line) }
+    }
+    while ($out.Count -gt 0 -and $out[$out.Count - 1] -eq '') { $out.RemoveAt($out.Count - 1) }
+    return @{ Text = (($out -join "`r`n") + "`r`n"); Columns = $columns }
 }
 
 # Z vložených řádků (libovolný počet sloupců oddělených tabulátorem) použije jen první a poslední sloupec.
@@ -492,7 +513,9 @@ function Update-InputCount {
     $lblCount.ForeColor = $cText
     if ($rows.Count -gt 0) {
         $cols = $rows[0].Split("`t").Count
-        if ($cols -ge 2) {
+        if ($cols -ge 2 -and $script:PastedCols -gt 2) {
+            $text = $text + "   •   vloženo sloupců: $($script:PastedCols), ponechán 1. a $($script:PastedCols)."
+        } elseif ($cols -ge 2) {
             $text = $text + "   •   sloupců: $cols (použije se 1. a $cols.)"
         } else {
             $text = $text + '   •   jen 1 sloupec!'
@@ -504,6 +527,7 @@ function Update-InputCount {
 
 $txtInput.Add_TextChanged({
     if ($script:Highlighting) { return }
+    if ($txtInput.TextLength -eq 0) { $script:PastedCols = 0 }
     Invoke-Safe { Update-InputCount } 'Počet řádků se nepodařilo spočítat.' })
 # Ctrl+V / Shift+Insert vloží jen čistý text (bez formátování z Excelu)
 $txtInput.Add_KeyDown({ param($s, $e)
@@ -511,7 +535,11 @@ $txtInput.Add_KeyDown({ param($s, $e)
         $e.SuppressKeyPress = $true
         $e.Handled = $true
         Invoke-Safe {
-            if ([System.Windows.Forms.Clipboard]::ContainsText()) { $txtInput.SelectedText = [System.Windows.Forms.Clipboard]::GetText() }
+            if (-not [System.Windows.Forms.Clipboard]::ContainsText()) { return }
+            $r = Reduce-PastedColumns ([System.Windows.Forms.Clipboard]::GetText())
+            if ($r.Error) { Show-Error $r.Error; return }
+            $script:PastedCols = $r.Columns
+            $txtInput.SelectedText = $r.Text
         } 'Vložení ze schránky se nezdařilo.'
     }
 })

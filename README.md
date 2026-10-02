@@ -19,7 +19,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 ## Použití
 
 1. Chcete-li pokračovat v dřívějších poznámkách, klikněte na **Otevřít soubor…** a vyberte `.txt`. Nové zápisy se pak přidávají na jeho konec.
-2. V Excelu označte celý rozsah řádků přes všechny sloupce (např. 25), stiskněte Ctrl+C a vložte ho do pole vlevo nahoře (Ctrl+V). Aplikace použije jen **první sloupec** (*Údaj k ověření*) a **poslední sloupec** (*Poznámka při Vymazat*). Sloupce mezi nimi ignoruje. Pod polem je vidět počet řádků a sloupců.
+2. V Excelu označte celý rozsah řádků přes všechny sloupce (např. 25), stiskněte Ctrl+C a vložte ho do pole vlevo nahoře (Ctrl+V). Aplikace použije jen **první sloupec** (*Údaj k ověření*) a **poslední sloupec** (*Poznámka při Vymazat*). Sloupce mezi nimi se zahodí hned při vložení, takže v poli zůstanou jen tyto dva. Pod polem je vidět počet řádků a kolik sloupců mělo vložení.
 3. Případně napište **Nadpis** a klikněte na **Vytvořit seznam**. Vyplněný nadpis se přidá na konec poznámek. Prázdné řádky se přeskočí. Seznam se nevytvoří a dosavadní seznam zůstane beze změny, když:
    - některý řádek má jen jeden sloupec,
    - řádky mají různý počet sloupců,
