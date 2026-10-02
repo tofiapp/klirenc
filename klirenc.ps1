@@ -1,151 +1,70 @@
 ﻿# Kontrola Clearance - pracovní pomocník pro ruční procházení řádků z Excelu
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
+# Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '18'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '19'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-# Ostré vykreslení při zvětšení zobrazení ve Windows (125 %, 150 % …): bez tohoto Windows aplikaci
-# vykreslí v malém a roztáhnou ji, takže vypadá rozmazaně a „kostičkovaně“. Musí proběhnout před vytvořením oken.
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationCore
+Add-Type -AssemblyName WindowsBase
+Add-Type -AssemblyName System.Drawing          # jen pro kreslení ikony KC
+
+# Vlastní identita procesu pro hlavní panel Windows: okno se neseskupí s ostatními okny PowerShellu
+# a na liště se zobrazí ikona KC. Musí proběhnout před vytvořením okna.
 try {
-    if (-not ('KcDpi' -as [type])) {
+    if (-not ('KcTaskbar' -as [type])) {
         Add-Type -TypeDefinition @'
-using System;
 using System.Runtime.InteropServices;
-public static class KcDpi {
-    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-    [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+public static class KcTaskbar {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
 }
 '@
     }
-    try { [void][KcDpi]::SetProcessDpiAwareness(2) } catch { [void][KcDpi]::SetProcessDPIAware() }
+    [void][KcTaskbar]::SetCurrentProcessExplicitAppUserModelID('KontrolaClearance.App')
+    [void][KcTaskbar]::SetProcessDPIAware()   # ostré vykreslení při zvětšeném zobrazení Windows
 } catch { }
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
-# Měřítko obrazovky (1 = 100 %, 1.25 = 125 % …) pro ruční rozměry v pixelech
-$script:S = 1.0
-try { $gd = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero); $script:S = $gd.DpiX / 96.0; $gd.Dispose() } catch { }
-function Px([double]$n) { [int][Math]::Round($n * $script:S) }
-
-# Zaoblená tlačítka a karty s vyhlazenými okraji (kreslené vlastním kódem, bez „zubatých“ rohů)
-if (-not ('KcButton' -as [type])) {
-    Add-Type -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing' -TypeDefinition @'
-using System;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Windows.Forms;
-
-public static class KcShapes {
-    public static GraphicsPath Round(RectangleF r, float rad) {
-        GraphicsPath p = new GraphicsPath();
-        float d = Math.Min(2 * rad, Math.Min(r.Width, r.Height));
-        if (d < 1) { p.AddRectangle(r); return p; }
-        p.AddArc(r.X, r.Y, d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        p.CloseFigure();
-        return p;
-    }
-    public static Color ParentBack(Control c) {
-        return c.Parent != null ? c.Parent.BackColor : SystemColors.Control;
-    }
-    public static Color Shade(Color c, double f) {
-        return Color.FromArgb((int)(c.R * f), (int)(c.G * f), (int)(c.B * f));
-    }
-}
-
-public class KcButton : Button {
-    public int Radius = 8;
-    public bool NoHover = false;
-    private bool hover, down;
-
-    public KcButton() {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        FlatStyle = FlatStyle.Flat;
-        FlatAppearance.BorderSize = 0;
-        UseVisualStyleBackColor = false;
-    }
-    protected override bool ShowFocusCues { get { return false; } }
-    protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; Invalidate(); base.OnMouseLeave(e); }
-    protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
-    protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
-
-    protected override void OnPaint(PaintEventArgs e) {
-        Graphics g = e.Graphics;
-        g.Clear(KcShapes.ParentBack(this));
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        float s = g.DpiX / 96f;
-        Color fill = BackColor;
-        if (!NoHover && Enabled) {
-            if (down) fill = KcShapes.Shade(fill, 0.85);
-            else if (hover) fill = KcShapes.Shade(fill, 0.92);
-        }
-        using (GraphicsPath path = KcShapes.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Radius * s))
-        using (SolidBrush b = new SolidBrush(fill)) {
-            g.FillPath(b, path);
-        }
-        Color fc = Enabled ? ForeColor : Color.FromArgb(140, ForeColor);
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-        using (StringFormat sf = new StringFormat())
-        using (SolidBrush tb = new SolidBrush(fc)) {
-            sf.Alignment = StringAlignment.Center;
-            sf.LineAlignment = StringAlignment.Center;
-            sf.Trimming = StringTrimming.EllipsisCharacter;
-            sf.FormatFlags = StringFormatFlags.NoWrap;
-            g.DrawString(Text, Font, tb, new RectangleF(0, 0, Width, Height), sf);
-        }
-    }
-}
-
-public class KcPanel : Panel {
-    public int Radius = 12;
-    public Color BorderColor = Color.Gainsboro;
-
-    public KcPanel() {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-    }
-    protected override void OnPaint(PaintEventArgs e) {
-        Graphics g = e.Graphics;
-        g.Clear(KcShapes.ParentBack(this));
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        float s = g.DpiX / 96f;
-        using (GraphicsPath path = KcShapes.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Radius * s))
-        using (SolidBrush b = new SolidBrush(BackColor))
-        using (Pen pen = new Pen(BorderColor)) {
-            g.FillPath(b, path);
-            g.DrawPath(pen, path);
-        }
-    }
-}
-'@
-}
 
 # ---------- Stav ----------
 $script:Items = New-Object System.Collections.Generic.List[object]
 $script:Index = 0
-$script:Highlighting = $false
 $script:Syncing = $false       # programové nastavení výběru v seznamu (neřešit jako klik)
 $script:Done = $false          # všechny řádky rozhodnuty a zobrazuje se dokončení
-$script:PastedCols = 0      # kolik sloupců mělo poslední vložení (před ořezáním)
-$script:NotesFile = $null   # soubor, do kterého se poznámky ukládají (po Otevřít / Uložit jako)
+$script:PastedCols = 0         # kolik sloupců mělo poslední vložení (před ořezáním)
+$script:NotesFile = $null      # soubor, do kterého se poznámky ukládají (po Otevřít / Uložit jako)
+$script:MyPath = $MyInvocation.MyCommand.Path
+$win = $null
 
-# Status: '' = nerozhodnuto, 'keep' = Ponechat, 'del' = Vymazat (poznámka zapsána)
-# Manual = záznam přidaný přes Vložit mezi
+# Status: '' = nerozhodnuto, 'keep' = Ponechat, 'del' = Vymazat (poznámka zapsána), 'unsure' = vrátit se později
+# Manual = záznam přidaný přes Vložit mezi; Num = pořadové číslo v seznamu (pro zobrazení)
 function New-Item2([string]$value, [string]$note, [bool]$manual = $false) {
-    [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual }
+    [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual; Num = 0 }
 }
 
-function Show-Info([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', 'Information') }
-function Show-Warn([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', 'Warning') }
-function Show-Error([string]$text) { [void][System.Windows.Forms.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', 'Error') }
+function Show-Msg([string]$text, [string]$icon) {
+    if ($win) { [void][System.Windows.MessageBox]::Show($win, $text, 'Kontrola Clearance', 'OK', $icon) }
+    else { [void][System.Windows.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', $icon) }
+}
+function Show-Info([string]$text)  { Show-Msg $text 'Information' }
+function Show-Warn([string]$text)  { Show-Msg $text 'Warning' }
+function Show-Error([string]$text) { Show-Msg $text 'Error' }
+function Ask-YesNo([string]$text, [string]$title, [string]$icon = 'Question') {
+    ([System.Windows.MessageBox]::Show($win, $text, $title, 'YesNo', $icon)) -eq 'Yes'
+}
 
 # Bezpečné spuštění obsluhy události - uživateli se nezobrazí technická chyba
 function Invoke-Safe([scriptblock]$action, [string]$message) {
     try { & $action } catch { Show-Error $message }
+}
+
+# Zápis do schránky s několika pokusy (schránku může chvilku držet jiná aplikace)
+function Set-ClipboardText([string]$text) {
+    for ($i = 0; $i -lt 6; $i++) {
+        try { [System.Windows.Clipboard]::SetDataObject($text, $true); return $true } catch { Start-Sleep -Milliseconds 40 }
+    }
+    return $false
 }
 
 # ---------- Parsování vstupu ----------
@@ -208,112 +127,9 @@ function ConvertFrom-Rows([string]$text) {
     return @{ Ok = $true; Items = $result; Columns = $columns }
 }
 
-# ---------- GUI ----------
-# Barevná paleta (světlý moderní vzhled)
+
+# ---------- Ikona KC ----------
 function RGB([int]$r, [int]$g, [int]$b) { [System.Drawing.Color]::FromArgb($r, $g, $b) }
-$cBg        = RGB 241 245 249   # pozadí okna
-$cCard      = RGB 255 255 255   # karty
-$cBorder    = RGB 226 232 240
-$cText      = RGB 15 23 42
-$cMuted     = RGB 100 116 139
-$cAccent    = RGB 14 116 144    # petrolejová (tyrkysově modrá)
-$cAccentBg  = RGB 224 247 250   # zvýraznění aktuálního řádku
-$cHeader    = RGB 255 255 255
-$cYes       = RGB 22 163 74
-$cNo        = RGB 225 29 72
-$cUnsure    = RGB 217 119 6
-$cWarn      = RGB 185 28 28
-$cDone      = RGB 21 128 61
-$cNeutral   = RGB 241 245 249
-$cInput     = RGB 248 250 252
-$cWhite     = [System.Drawing.Color]::White
-
-$fontBase  = New-Object System.Drawing.Font('Segoe UI', 10)
-$fontSmall = New-Object System.Drawing.Font('Segoe UI', 9)
-$fontHead  = New-Object System.Drawing.Font('Segoe UI Semibold', 10.5)
-$fontBig   = New-Object System.Drawing.Font('Segoe UI Semibold', 28)
-$fontBtn   = New-Object System.Drawing.Font('Segoe UI Semibold', 18)
-$fontState = New-Object System.Drawing.Font('Segoe UI Semibold', 10.5)
-$fontMono  = New-Object System.Drawing.Font('Consolas', 10.5)
-$fontMonoB = New-Object System.Drawing.Font('Consolas', 10.5, [System.Drawing.FontStyle]::Bold)
-
-# Tmavší odstín barvy (pro najetí myší)
-function Get-Shade($c, [double]$f) {
-    [System.Drawing.Color]::FromArgb([int]($c.R * $f), [int]($c.G * $f), [int]($c.B * $f))
-}
-
-# Poloměr zaoblení (jen u tlačítek KcButton a karet KcPanel)
-function Set-Rounded($ctrl, [int]$radius) {
-    if ($ctrl -is [KcButton] -or $ctrl -is [KcPanel]) { $ctrl.Radius = $radius; $ctrl.Invalidate() }
-}
-
-function Set-FlatButton($btn, $back, $fore) {
-    $btn.FlatStyle = 'Flat'
-    $btn.FlatAppearance.BorderSize = 0
-    $btn.FlatAppearance.MouseOverBackColor = Get-Shade $back 0.92
-    $btn.FlatAppearance.MouseDownBackColor = Get-Shade $back 0.85
-    $btn.BackColor = $back
-    $btn.ForeColor = $fore
-    $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $btn.UseVisualStyleBackColor = $false
-}
-
-function New-Button([string]$text, $back, $fore) {
-    $b = New-Object KcButton
-    $b.Text = $text
-    $b.AutoSize = $true
-    $b.Height = 36
-    $b.MinimumSize = New-Object System.Drawing.Size(0, 36)
-    $b.Padding = New-Object System.Windows.Forms.Padding(12, 2, 12, 2)
-    $b.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 6)
-    Set-FlatButton $b $back $fore
-    Set-Rounded $b 8
-    $b
-}
-
-# Velké tlačítko vyplňující buňku
-function New-BigButton([string]$text, $back, $fore, $font) {
-    $b = New-Object KcButton
-    $b.Text = $text
-    $b.Dock = 'Fill'
-    $b.Font = $font
-    $b.Margin = New-Object System.Windows.Forms.Padding(6, 4, 6, 4)
-    Set-FlatButton $b $back $fore
-    Set-Rounded $b 12
-    $b
-}
-
-# Světlé vedlejší tlačítko
-function New-GhostButton([string]$text, $back = $null) {
-    if ($null -eq $back) { $back = RGB 232 237 244 }
-    New-Button $text $back $cText
-}
-
-function New-Card {
-    $card = New-Object KcPanel
-    $card.Dock = 'Fill'
-    $card.BackColor = $cCard
-    $card.BorderColor = $cBorder
-    $card.Radius = 12
-    $card.Margin = New-Object System.Windows.Forms.Padding(6)
-    $card.Padding = New-Object System.Windows.Forms.Padding(16, 12, 16, 12)
-    @{ Outer = $card; Inner = $card }
-}
-
-function New-Caption([string]$text) {
-    $l = New-Object System.Windows.Forms.Label
-    $l.Text = $text
-    $l.Dock = 'Top'
-    $l.Height = 26
-    $l.Font = $fontHead
-    $l.ForeColor = $cText
-    $l
-}
-
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Kontrola Clearance  –  verze $($script:AppVersion)"
-
-# Ikona „KC“ kreslená přímo v aplikaci (bez souboru): zaoblený čtverec s bílým písmem
 function New-KcBitmap([int]$size) {
     $bmp = New-Object System.Drawing.Bitmap($size, $size)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -338,24 +154,17 @@ function New-KcBitmap([int]$size) {
     $font.Dispose(); $brush.Dispose(); $path.Dispose(); $g.Dispose()
     $bmp
 }
-# Vlastní identita procesu pro hlavní panel Windows: okno se neseskupí s ostatními okny PowerShellu
-# a na liště se zobrazí ikona KC
-try {
-    if (-not ('KcTaskbar' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System.Runtime.InteropServices;
-public static class KcTaskbar {
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+
+# Ikona pro okno WPF (PNG s průhledností)
+function Get-KcImageSource([int]$size) {
+    $bmp = New-KcBitmap $size
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    $ms.Position = 0
+    $dec = New-Object System.Windows.Media.Imaging.PngBitmapDecoder($ms, 'PreservePixelFormat', 'OnLoad')
+    $dec.Frames[0]
 }
-'@
-    }
-    [void][KcTaskbar]::SetCurrentProcessExplicitAppUserModelID('KontrolaClearance.App')
-} catch { }
-try {
-    $iconBmp = New-KcBitmap 256
-    $form.Icon = [System.Drawing.Icon]::FromHandle($iconBmp.GetHicon())
-} catch { }
 
 # Uloží ikonu KC jako .ico (obrázek PNG 256×256 uvnitř souboru ICO)
 function Save-KcIco([string]$path) {
@@ -405,431 +214,324 @@ function Update-Shortcuts {
         } catch { }
     }
 }
-$script:MyPath = $MyInvocation.MyCommand.Path
 
-$form.Size = New-Object System.Drawing.Size(1200, 820)
-$form.MinimumSize = New-Object System.Drawing.Size(950, 650)
-$form.StartPosition = 'CenterScreen'
-$form.Font = $fontBase
-# Pevné rozměry v pixelech (výšky řádků, okraje …) se přepočtou podle měřítka obrazovky
-$form.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
-$form.AutoScaleMode = 'Dpi'
-$form.BackColor = $cBg
-$form.ForeColor = $cText
+# ---------- Vzhled okna (XAML) ----------
+[xml]$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Kontrola Clearance" Width="1200" Height="820" MinWidth="950" MinHeight="650"
+        WindowStartupLocation="CenterScreen" Background="#F1F5F9"
+        FontFamily="Segoe UI" FontSize="14" Foreground="#0F172A"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+  <Window.Resources>
+    <SolidColorBrush x:Key="Accent" Color="#0E7490"/>
+    <SolidColorBrush x:Key="AccentBg" Color="#E0F7FA"/>
+    <SolidColorBrush x:Key="Muted" Color="#64748B"/>
+    <SolidColorBrush x:Key="Line" Color="#E2E8F0"/>
 
-# --- Hlavička: název, stav a pozice ---
-$header = New-Object System.Windows.Forms.TableLayoutPanel
-$header.Dock = 'Top'
-$header.Height = 60
-$header.BackColor = $cHeader
-$header.ColumnCount = 4
-$header.Padding = New-Object System.Windows.Forms.Padding(16, 0, 16, 0)
-[void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-[void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
-[void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-[void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-$lblApp = New-Object System.Windows.Forms.Label
-$lblApp.Text = 'Kontrola Clearance'
-$lblApp.AutoSize = $true
-$lblApp.Anchor = 'Left'
-$lblApp.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
-$lblApp.ForeColor = $cAccent
-$lblState = New-Object KcButton
-$lblState.NoHover = $true
-$lblState.TabStop = $false
-$lblState.Cursor = [System.Windows.Forms.Cursors]::Default
-$lblState.AutoSize = $true
-$lblState.Anchor = 'Left'
-$lblState.Margin = New-Object System.Windows.Forms.Padding(18, 0, 0, 0)
-$lblState.Padding = New-Object System.Windows.Forms.Padding(12, 5, 12, 5)
-$lblState.Font = $fontState
-Set-Rounded $lblState 14
-$lblPos = New-Object System.Windows.Forms.Label
-$lblPos.AutoSize = $true
-$lblPos.Anchor = 'Right'
-$lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
-$lblPos.ForeColor = $cText
-$header.Controls.Add($lblApp, 0, 0)
-$header.Controls.Add($lblState, 1, 0)
-$chkMiddle = New-Object System.Windows.Forms.CheckBox
-$chkMiddle.Text = 'Vkládat Ctrl + kliknutím'
-$chkMiddle.AutoSize = $true
-$chkMiddle.Anchor = 'Right'
-$chkMiddle.Checked = $true
-$chkMiddle.ForeColor = $cMuted
-$chkMiddle.Margin = New-Object System.Windows.Forms.Padding(0, 0, 24, 0)
-$header.Controls.Add($chkMiddle, 2, 0)
-$header.Controls.Add($lblPos, 3, 0)
+    <!-- Zaoblené ploché tlačítko -->
+    <Style x:Key="Btn" TargetType="Button">
+      <Setter Property="Background" Value="#E8EDF4"/>
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="Padding" Value="16,8"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Tag" Value="8"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="BtnPrimary" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Background" Value="{StaticResource Accent}"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="BtnBig" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="24"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="6,4"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="14">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.9"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.78"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.35"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="BtnNav" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Width" Value="40"/>
+      <Setter Property="Height" Value="34"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Margin" Value="6,0,0,0"/>
+      <Setter Property="Background" Value="#F1F5F9"/>
+    </Style>
 
-$split = New-Object System.Windows.Forms.SplitContainer
-$split.Dock = 'Fill'
-$split.Orientation = 'Vertical'
-$split.BackColor = $cBg
-$split.SplitterWidth = 6
-$split.Padding = New-Object System.Windows.Forms.Padding(8)
-$form.Controls.Add($split)
-$headerLine = New-Object System.Windows.Forms.Panel
-$headerLine.Dock = 'Top'
-$headerLine.Height = 1
-$headerLine.BackColor = $cBorder
-$form.Controls.Add($headerLine)
-$form.Controls.Add($header)
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="16,14"/>
+      <Setter Property="Margin" Value="6"/>
+    </Style>
 
-# --- Levá část: import a práce ---
-$left = New-Object System.Windows.Forms.TableLayoutPanel
-$left.Dock = 'Fill'
-$left.ColumnCount = 1
-$left.RowCount = 4
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # import
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # aktuální hodnota
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 88)))   # Ponechat / Vymazat
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))       # vedlejší akce
-$split.Panel1.Controls.Add($left)
+    <Style x:Key="Field" TargetType="TextBox">
+      <Setter Property="Background" Value="#F8FAFC"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="8,6"/>
+    </Style>
 
-# Import: jedno pole, do kterého se vloží řádky z Excelu (použije se 1. a poslední sloupec)
-$importCard = New-Card
-$left.Controls.Add($importCard.Outer, 0, 0)
+    <!-- Řádek seznamu: aktuální řádek je podbarvený s proužkem vlevo -->
+    <Style x:Key="Row" TargetType="ListBoxItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border x:Name="Bd" Background="Transparent" BorderThickness="4,0,0,0" BorderBrush="Transparent" Padding="8,5">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#F1F5F9"/></Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBg}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
 
-$importGrid = New-Object System.Windows.Forms.TableLayoutPanel
-$importGrid.Dock = 'Fill'
-$importGrid.ColumnCount = 1
-$importGrid.RowCount = 2
-[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
-[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
-$importCard.Inner.Controls.Add($importGrid)
+  <DockPanel>
+    <!-- Hlavička -->
+    <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="20,12">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBlock Text="Kontrola Clearance" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+        <Border x:Name="StatePill" Grid.Column="1" CornerRadius="14" Padding="14,5" Margin="20,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center" Background="#E2E8F0">
+          <TextBlock x:Name="StateText" Text="Bez seznamu" FontWeight="SemiBold" Foreground="{StaticResource Muted}"/>
+        </Border>
+        <CheckBox x:Name="ChkCtrl" Grid.Column="2" Content="Vkládat Ctrl + kliknutím" IsChecked="True" VerticalAlignment="Center" Margin="0,0,28,0" Foreground="{StaticResource Muted}"/>
+        <TextBlock x:Name="PosText" Grid.Column="3" Text="0 / 0" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"/>
+      </Grid>
+    </Border>
 
-# RichTextBox kvůli zvýraznění aktuálního řádku
-$txtInput = New-Object System.Windows.Forms.RichTextBox
-$txtInput.Multiline = $true
-$txtInput.ScrollBars = 'Both'
-$txtInput.WordWrap = $false
-$txtInput.DetectUrls = $false
-$txtInput.AcceptsTab = $true
-$txtInput.Dock = 'Fill'
-$txtInput.Font = $fontMono
-$txtInput.BorderStyle = 'None'
-$txtInput.BackColor = $cInput
+    <Grid Margin="8">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
 
-$importPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$importPanel.Dock = 'Fill'
-$importPanel.AutoSize = $true
-$importPanel.AutoSizeMode = 'GrowAndShrink'
-$importPanel.WrapContents = $false
-$importPanel.Padding = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
-$btnLoad = New-Button 'Vytvořit seznam' $cAccent $cWhite
-$btnLoad.Font = $fontState
-$btnClear = New-GhostButton 'Zrušit seznam'
-$lblCount = New-Object System.Windows.Forms.Label
-$lblCount.AutoSize = $true
-$lblCount.Padding = New-Object System.Windows.Forms.Padding(8, 9, 0, 0)
-$lblCount.Font = $fontState
-$lblCount.Text = 'Řádků: 0'
-$importPanel.Controls.AddRange(@($btnLoad, $btnClear, $lblCount))
-# Seznam řádků se stavem (zobrazí se místo vstupního pole po Vytvořit seznam)
-$lstItems = New-Object System.Windows.Forms.ListBox
-$lstItems.Dock = 'Fill'
-$lstItems.DrawMode = 'OwnerDrawFixed'
-$lstItems.ItemHeight = Px 28
-$lstItems.IntegralHeight = $false
-$lstItems.BorderStyle = 'None'
-$lstItems.BackColor = $cInput
-$lstItems.Font = $fontBase
-$lstItems.Visible = $false
-$inputHost = New-Object System.Windows.Forms.Panel
-$inputHost.Dock = 'Fill'
-$inputHost.Margin = New-Object System.Windows.Forms.Padding(0)
-$inputHost.Controls.Add($txtInput)
-$inputHost.Controls.Add($lstItems)
-$importGrid.Controls.Add($inputHost, 0, 0)
-$importGrid.Controls.Add($importPanel, 0, 1)
+      <!-- Levá část -->
+      <Grid Grid.Column="0">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="88"/><RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-# Aktuální hodnota: horní lišta (popisek + šipky), velká hodnota, dole info o poznámce
-$currentCard = New-Card
-$left.Controls.Add($currentCard.Outer, 0, 1)
+        <!-- Vstup / seznam -->
+        <Border Grid.Row="0" Style="{StaticResource Card}">
+          <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <TextBox x:Name="InputBox" Style="{StaticResource Field}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
+                     FontFamily="Consolas" FontSize="13" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+            <ListBox x:Name="ItemsList" Visibility="Collapsed" BorderThickness="1" BorderBrush="{StaticResource Line}" Background="#F8FAFC"
+                     ItemContainerStyle="{StaticResource Row}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     VirtualizingStackPanel.IsVirtualizing="True">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="44"/><ColumnDefinition Width="26"/><ColumnDefinition Width="45*"/><ColumnDefinition Width="55*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Num}" Foreground="#94A3B8" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="Mark" Grid.Column="1" Text="" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="{Binding Value}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <TextBlock x:Name="NoteTb" Grid.Column="3" Text="{Binding Note}" Foreground="{StaticResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                  </Grid>
+                  <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Status}" Value="keep"><Setter TargetName="Mark" Property="Text" Value="✓"/><Setter TargetName="Mark" Property="Foreground" Value="#16A34A"/></DataTrigger>
+                    <DataTrigger Binding="{Binding Status}" Value="del"><Setter TargetName="Mark" Property="Text" Value="✗"/><Setter TargetName="Mark" Property="Foreground" Value="#E11D48"/></DataTrigger>
+                    <DataTrigger Binding="{Binding Status}" Value="unsure"><Setter TargetName="Mark" Property="Text" Value="?"/><Setter TargetName="Mark" Property="Foreground" Value="#D97706"/></DataTrigger>
+                    <DataTrigger Binding="{Binding Manual}" Value="True"><Setter TargetName="NoteTb" Property="FontStyle" Value="Italic"/></DataTrigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+              <Button x:Name="BtnLoad" Style="{StaticResource BtnPrimary}" Content="Vytvořit seznam"/>
+              <Button x:Name="BtnClear" Style="{StaticResource Btn}" Content="Zrušit seznam"/>
+              <TextBlock x:Name="CountText" Text="Řádků: 0" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+          </Grid>
+        </Border>
 
-$currentTop = New-Object System.Windows.Forms.TableLayoutPanel
-$currentTop.Dock = 'Top'
-$currentTop.Height = 40
-$currentTop.ColumnCount = 3
-[void]$currentTop.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
-[void]$currentTop.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute', 46)))
-[void]$currentTop.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute', 46)))
-$lblCurrentCap = New-Object System.Windows.Forms.Label
-$lblCurrentCap.Text = 'AKTUÁLNÍ ÚDAJ  •  zkopírováno do schránky'
-$lblCurrentCap.Dock = 'Fill'
-$lblCurrentCap.TextAlign = 'MiddleLeft'
-$lblCurrentCap.Font = $fontSmall
-$lblCurrentCap.ForeColor = $cMuted
-function New-NavButton([string]$text) {
-    $b = New-Object KcButton
-    $b.Text = $text
-    $b.Dock = 'Fill'
-    $b.Font = New-Object System.Drawing.Font('Segoe UI', 11)
-    $b.Margin = New-Object System.Windows.Forms.Padding(4, 2, 0, 2)
-    Set-FlatButton $b $cNeutral $cText
-    Set-Rounded $b 8
-    $b
+        <!-- Aktuální údaj -->
+        <Border Grid.Row="1" Style="{StaticResource Card}">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBlock Text="AKTUÁLNÍ ÚDAJ  •  zkopírováno do schránky" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+              <Button x:Name="BtnUp" Grid.Column="1" Style="{StaticResource BtnNav}" Content="▲" ToolTip="Předchozí řádek"/>
+              <Button x:Name="BtnDown" Grid.Column="2" Style="{StaticResource BtnNav}" Content="▼" ToolTip="Další řádek"/>
+            </Grid>
+            <TextBlock x:Name="CurrentNote" DockPanel.Dock="Bottom" TextAlignment="Center" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,6,0,0"/>
+            <TextBlock x:Name="CurrentText" FontSize="34" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
+                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+          </DockPanel>
+        </Border>
+
+        <!-- Ponechat / Vymazat -->
+        <Grid Grid.Row="2">
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+          <Button x:Name="BtnYes" Style="{StaticResource BtnBig}" Background="#16A34A" Content="Ponechat"/>
+          <Button x:Name="BtnNo" Grid.Column="1" Style="{StaticResource BtnBig}" Background="#E11D48" Content="Vymazat"/>
+        </Grid>
+
+        <!-- Vedlejší akce -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,4">
+          <Button x:Name="BtnUnsure" Style="{StaticResource Btn}" Background="White" Foreground="#D97706" Content="?   Vrátit se později"/>
+          <Button x:Name="BtnInsert" Style="{StaticResource Btn}" Background="White" Foreground="{StaticResource Accent}" Content="+   Vložit mezi" Margin="0"/>
+        </StackPanel>
+      </Grid>
+
+      <!-- Pravá část: poznámky -->
+      <Border Grid.Column="1" Style="{StaticResource Card}">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="Název souboru (.txt)" FontWeight="SemiBold"/>
+          <TextBox x:Name="FileNameBox" Grid.Row="1" Style="{StaticResource Field}" Margin="0,6,0,14" FontSize="15"/>
+          <TextBlock x:Name="NotesCaption" Grid.Row="2" Text="Poznámky  •  zatím neuloženo" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,0,6"/>
+          <TextBox x:Name="NotesBox" Grid.Row="3" Style="{StaticResource Field}" AcceptsReturn="True" TextWrapping="Wrap"
+                   FontFamily="Consolas" FontSize="13" VerticalScrollBarVisibility="Auto"/>
+          <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="BtnOpen" Style="{StaticResource Btn}" Content="Otevřít soubor…"/>
+            <Button x:Name="BtnSave" Style="{StaticResource BtnPrimary}" Content="Uložit"/>
+            <Button x:Name="BtnSaveAs" Style="{StaticResource Btn}" Content="Uložit jako…"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>
+'@
+
+$win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+foreach ($n in @('StatePill','StateText','ChkCtrl','PosText','InputBox','ItemsList','BtnLoad','BtnClear','CountText',
+                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnInsert',
+                 'FileNameBox','NotesCaption','NotesBox','BtnOpen','BtnSave','BtnSaveAs')) {
+    Set-Variable -Name $n -Value $win.FindName($n) -Scope Script
 }
-$btnUp = New-NavButton '▲'
-$btnDown = New-NavButton '▼'
-$tips = New-Object System.Windows.Forms.ToolTip
-$tips.SetToolTip($btnUp, 'Předchozí řádek')
-$tips.SetToolTip($btnDown, 'Další řádek')
-$currentTop.Controls.Add($lblCurrentCap, 0, 0)
-$currentTop.Controls.Add($btnUp, 1, 0)
-$currentTop.Controls.Add($btnDown, 2, 0)
+$win.Title = "Kontrola Clearance  –  verze $($script:AppVersion)"
+try { $win.Icon = Get-KcImageSource 256 } catch { }
 
-$lblCurrentNote = New-Object System.Windows.Forms.Label
-$lblCurrentNote.Dock = 'Bottom'
-$lblCurrentNote.Height = 34
-$lblCurrentNote.Font = $fontBase
-$lblCurrentNote.ForeColor = $cMuted
-$lblCurrentNote.TextAlign = 'MiddleCenter'
-$lblCurrentNote.AutoEllipsis = $true
-$lblCurrent = New-Object System.Windows.Forms.Label
-$lblCurrent.Dock = 'Fill'
-$lblCurrent.Font = $fontBig
-$lblCurrent.TextAlign = 'MiddleCenter'
-$lblCurrent.AutoEllipsis = $true
-$currentCard.Inner.Controls.Add($lblCurrent)
-$currentCard.Inner.Controls.Add($lblCurrentNote)
-$currentCard.Inner.Controls.Add($currentTop)
-
-# Hlavní rozhodnutí: dvě velká tlačítka vedle sebe
-$actionPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$actionPanel.Dock = 'Fill'
-$actionPanel.ColumnCount = 2
-[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
-[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
-$btnYes = New-BigButton 'Ponechat' $cYes $cWhite $fontBtn
-$btnNo  = New-BigButton 'Vymazat' $cNo $cWhite $fontBtn
-$actionPanel.Controls.Add($btnYes, 0, 0)
-$actionPanel.Controls.Add($btnNo, 1, 0)
-$left.Controls.Add($actionPanel, 0, 2)
-
-# Vedlejší akce: malá tlačítka uprostřed pod hlavními
-$secondaryPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$secondaryPanel.Dock = 'Fill'
-$secondaryPanel.AutoSize = $true
-$secondaryPanel.AutoSizeMode = 'GrowAndShrink'
-$secondaryPanel.ColumnCount = 4
-[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
-[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
-$btnUnsure = New-GhostButton '?   Vrátit se později' $cWhite
-$btnUnsure.ForeColor = $cUnsure
-$btnInsert = New-GhostButton '+   Vložit mezi' $cWhite
-$btnInsert.ForeColor = $cAccent
-$btnUnsure.Anchor = 'None'
-$btnInsert.Anchor = 'None'
-$secondaryPanel.Controls.Add($btnUnsure, 1, 0)
-$secondaryPanel.Controls.Add($btnInsert, 2, 0)
-$left.Controls.Add($secondaryPanel, 0, 3)
-
-# --- Pravá část: poznámky ---
-$notesCard = New-Card
-$split.Panel2.Controls.Add($notesCard.Outer)
-$right = New-Object System.Windows.Forms.TableLayoutPanel
-$right.Dock = 'Fill'
-$right.ColumnCount = 1
-$right.RowCount = 5
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 26)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 30)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
-$notesCard.Inner.Controls.Add($right)
-
-$lblTitle = New-Object System.Windows.Forms.Label
-$lblTitle.Text = 'Název souboru (.txt)'
-$lblTitle.Dock = 'Fill'
-$lblTitle.Font = $fontHead
-$titleRow = New-Object System.Windows.Forms.TableLayoutPanel
-$titleRow.Dock = 'Fill'
-$titleRow.AutoSize = $true
-$titleRow.AutoSizeMode = 'GrowAndShrink'
-$titleRow.ColumnCount = 2
-[void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
-[void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-$txtFileName = New-Object System.Windows.Forms.TextBox
-$txtFileName.Dock = 'Fill'
-$txtFileName.Font = New-Object System.Drawing.Font('Segoe UI', 11)
-$txtFileName.Margin = New-Object System.Windows.Forms.Padding(0, 6, 0, 0)
-$titleRow.Controls.Add($txtFileName, 0, 0)
-$titleRow.SetColumnSpan($txtFileName, 2)
-$lblNotes = New-Object System.Windows.Forms.Label
-$lblNotes.Text = 'Poznámky'
-$lblNotes.Dock = 'Fill'
-$lblNotes.Font = $fontHead
-$lblNotes.TextAlign = 'BottomLeft'
-$lblNotes.AutoEllipsis = $true
-$txtNotes = New-Object System.Windows.Forms.TextBox
-$txtNotes.Multiline = $true
-$txtNotes.ScrollBars = 'Vertical'
-$txtNotes.WordWrap = $true
-$txtNotes.Dock = 'Fill'
-$txtNotes.Font = $fontMono
-$txtNotes.BorderStyle = 'None'
-$txtNotes.BackColor = $cInput
-$saveRow = New-Object System.Windows.Forms.FlowLayoutPanel
-$saveRow.Dock = 'Fill'
-$saveRow.AutoSize = $true
-$saveRow.AutoSizeMode = 'GrowAndShrink'
-$saveRow.WrapContents = $false
-$saveRow.Padding = New-Object System.Windows.Forms.Padding(0, 6, 0, 0)
-$btnOpen = New-GhostButton 'Otevřít soubor…'
-$btnSave = New-Button 'Uložit' $cAccent $cWhite
-$btnSaveAs = New-GhostButton 'Uložit jako…'
-$saveRow.Controls.AddRange(@($btnOpen, $btnSave, $btnSaveAs))
-$right.Controls.Add($lblTitle, 0, 0)
-$right.Controls.Add($titleRow, 0, 1)
-$right.Controls.Add($lblNotes, 0, 2)
-$right.Controls.Add($txtNotes, 0, 3)
-$right.Controls.Add($saveRow, 0, 4)
+function Brush([string]$hex) { New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($hex)) }
+$bMuted = Brush '#64748B'; $bText = Brush '#0F172A'; $bDone = Brush '#15803D'; $bWarn = Brush '#B91C1C'
 
 # ---------- Logika ----------
 function Add-NoteLine([string]$line) {
-    $t = $txtNotes.Text
+    $t = $NotesBox.Text
     if ($t.Length -gt 0 -and -not $t.EndsWith("`n")) { $t += "`r`n" }
-    $txtNotes.Text = $t + $line + "`r`n"
-    $txtNotes.SelectionStart = $txtNotes.Text.Length
-    $txtNotes.ScrollToCaret()
+    $NotesBox.Text = $t + $line + "`r`n"
+    $NotesBox.CaretIndex = $NotesBox.Text.Length
+    $NotesBox.ScrollToEnd()
 }
 
-function Set-State([string]$text, $back, $fore) {
-    $lblState.Text = $text
-    $lblState.BackColor = $back
-    $lblState.ForeColor = $fore
-}
-
-# Odstraní z poznámek poslední řádek přesně rovný $line (při změně Vymazat -> Ponechat)
+# Odstraní z poznámek poslední řádek přesně rovný $line (při změně Vymazat -> Ponechat / ?)
 function Remove-NoteLine([string]$line) {
-    $lines = [System.Collections.Generic.List[string]]($txtNotes.Text -split "\r?\n")
+    $lines = [System.Collections.Generic.List[string]]($NotesBox.Text -split "\r?\n")
     for ($i = $lines.Count - 1; $i -ge 0; $i--) {
         if ($lines[$i].Trim() -eq $line) {
             $lines.RemoveAt($i)
-            $txtNotes.Text = $lines -join "`r`n"
+            $NotesBox.Text = $lines -join "`r`n"
             return $true
         }
     }
     return $false
 }
 
-# Vykreslení jednoho řádku seznamu: číslo, značka stavu, údaj, poznámka
-#   ✓ = Ponechat, ✗ = Vymazat (zapsáno do poznámek), ? = vrátit se později, bez značky = nerozhodnuto
-$lstItems.Add_DrawItem({ param($s, $e)
-    try {
-        if ($e.Index -lt 0 -or $e.Index -ge $script:Items.Count) { return }
-        $it = $script:Items[$e.Index]
-        $g = $e.Graphics
-        $r = $e.Bounds
-        $isCur = ($e.Index -eq $script:Index -and -not $script:Done)
-        $back = if ($isCur) { $cAccentBg } else { $cInput }
-        $bb = New-Object System.Drawing.SolidBrush($back)
-        $g.FillRectangle($bb, $r)
-        $bb.Dispose()
-        if ($isCur) {
-            $ab = New-Object System.Drawing.SolidBrush($cAccent)
-            $g.FillRectangle($ab, $r.X, $r.Y, (Px 4), $r.Height)
-            $ab.Dispose()
-        }
-        $flags = [System.Windows.Forms.TextFormatFlags]'VerticalCenter, EndEllipsis, NoPrefix, SingleLine'
-        $mark = ''; $markColor = $cMuted
-        switch ($it.Status) {
-            'keep'   { $mark = '✓'; $markColor = $cYes }
-            'del'    { $mark = '✗'; $markColor = $cNo }
-            'unsure' { $mark = '?'; $markColor = $cUnsure }
-        }
-        $wRest = [Math]::Max(10, $r.Width - (Px 80))
-        $wVal = [int]($wRest * 0.45)
-        $numRect  = New-Object System.Drawing.Rectangle(($r.X + (Px 8)), $r.Y, (Px 40), $r.Height)
-        $markRect = New-Object System.Drawing.Rectangle(($r.X + (Px 48)), $r.Y, (Px 24), $r.Height)
-        $valRect  = New-Object System.Drawing.Rectangle(($r.X + (Px 76)), $r.Y, $wVal, $r.Height)
-        $noteRect = New-Object System.Drawing.Rectangle(($r.X + (Px 84) + $wVal), $r.Y, ($wRest - $wVal - (Px 8)), $r.Height)
-        [System.Windows.Forms.TextRenderer]::DrawText($g, "$($e.Index + 1)", $fontSmall, $numRect, $cMuted, $flags)
-        [System.Windows.Forms.TextRenderer]::DrawText($g, $mark, $fontState, $markRect, $markColor, $flags)
-        $valFont = if ($isCur) { $fontHead } else { $fontBase }
-        $valColor = if ($isCur) { $cAccent } else { $cText }
-        [System.Windows.Forms.TextRenderer]::DrawText($g, $it.Value, $valFont, $valRect, $valColor, $flags)
-        $note = $it.Note
-        if ($it.Manual) { $note = "$note   (vloženo ručně)" }
-        [System.Windows.Forms.TextRenderer]::DrawText($g, $note, $fontSmall, $noteRect, $cMuted, $flags)
-    } catch { }
-})
-
-# Kliknutí nebo šipky v seznamu: vybraný řádek se stane aktuálním
-$lstItems.Add_SelectedIndexChanged({
-    if ($script:Syncing) { return }
-    Invoke-Safe {
-        $i = $lstItems.SelectedIndex
-        if ($i -ge 0 -and $i -lt $script:Items.Count) {
-            $script:Index = $i
-            $script:Done = $false
-            Show-Current
-        }
-    } 'Přechod na řádek se nezdařil.'
-})
+function Set-State([string]$text, [string]$back, [string]$fore) {
+    $StateText.Text = $text
+    $StatePill.Background = Brush $back
+    $StateText.Foreground = Brush $fore
+}
 
 # Seznam místo vstupního pole (bez seznamu se zobrazí vstupní pole)
 function Update-ListBox {
     if ($script:Items.Count -eq 0) {
-        $lstItems.Visible = $false
-        $txtInput.Visible = $true
+        $ItemsList.ItemsSource = $null
+        $ItemsList.Visibility = 'Collapsed'
+        $InputBox.Visibility = 'Visible'
         return
     }
     $script:Syncing = $true
     try {
-        $lstItems.BeginUpdate()
-        if ($lstItems.Items.Count -ne $script:Items.Count) {
-            $lstItems.Items.Clear()
-            for ($i = 0; $i -lt $script:Items.Count; $i++) { [void]$lstItems.Items.Add($i) }
-        }
-        $lstItems.SelectedIndex = if ($script:Done) { -1 } else { $script:Index }
-        $lstItems.EndUpdate()
-        $lstItems.Invalidate()
-        $txtInput.Visible = $false
-        $lstItems.Visible = $true
+        for ($i = 0; $i -lt $script:Items.Count; $i++) { $script:Items[$i].Num = $i + 1 }
+        if (-not [object]::ReferenceEquals($ItemsList.ItemsSource, $script:Items)) { $ItemsList.ItemsSource = $script:Items }
+        else { $ItemsList.Items.Refresh() }
+        $ItemsList.SelectedIndex = if ($script:Done) { -1 } else { $script:Index }
+        if (-not $script:Done) { $ItemsList.ScrollIntoView($script:Items[$script:Index]) }
+        $InputBox.Visibility = 'Collapsed'
+        $ItemsList.Visibility = 'Visible'
     } finally { $script:Syncing = $false }
 }
 
 function Update-View {
     $count = $script:Items.Count
     $decided = @($script:Items | Where-Object { $_.Status -eq 'keep' -or $_.Status -eq 'del' }).Count
-    $btnOn = ($count -gt 0 -and -not $script:Done)
-    # tlačítka se nevypínají (vypnutá vypadají nečitelně), jen se zesvětlí; obsluha si sama hlídá stav
-    $btnYes.Cursor = if ($btnOn) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
-    $btnNo.Cursor = $btnYes.Cursor
-    $btnUp.Enabled = ($count -gt 0); $btnDown.Enabled = ($count -gt 0)
-    $btnYes.BackColor = if ($btnOn) { $cYes } else { RGB 187 222 199 }
-    $btnNo.BackColor  = if ($btnOn) { $cNo }  else { RGB 240 190 202 }
-    $lblCurrentNote.Text = ''
+    $on = ($count -gt 0 -and -not $script:Done)
+    $BtnYes.IsEnabled = $on; $BtnNo.IsEnabled = $on; $BtnUnsure.IsEnabled = $on; $BtnInsert.IsEnabled = $on
+    $BtnUp.IsEnabled = ($count -gt 0); $BtnDown.IsEnabled = ($count -gt 0)
+    $CurrentNote.Text = ''
     if ($count -eq 0) {
-        Set-State 'Bez seznamu' (RGB 226 232 240) $cMuted
-        $lblPos.Text = '0 / 0'
-        $lblCurrent.Text = 'Vložte řádky z Excelu a klikněte na Vytvořit seznam'
-        $lblCurrent.ForeColor = $cMuted
+        Set-State 'Bez seznamu' '#E2E8F0' '#64748B'
+        $PosText.Text = '0 / 0'
+        $CurrentText.Text = 'Vložte řádky z Excelu a klikněte na Vytvořit seznam'
+        $CurrentText.Foreground = $bMuted
     } elseif ($script:Done) {
-        Set-State "✓ Dokončeno  ($decided / $count)" (RGB 220 252 231) $cDone
-        $lblPos.Text = "$count / $count"
-        $lblCurrent.Text = '✓ Hotovo – všechny řádky jsou rozhodnuté'
-        $lblCurrent.ForeColor = $cDone
-        $lblCurrentNote.Text = 'Šipkami ▲ ▼ nebo kliknutím do seznamu se můžete k libovolnému řádku vrátit.'
+        Set-State "✓ Dokončeno  ($decided / $count)" '#DCFCE7' '#15803D'
+        $PosText.Text = "$count / $count"
+        $CurrentText.Text = '✓ Hotovo – všechny řádky jsou rozhodnuté'
+        $CurrentText.Foreground = $bDone
+        $CurrentNote.Text = 'Šipkami ▲ ▼ nebo kliknutím do seznamu se můžete k libovolnému řádku vrátit.'
     } else {
-        if ($decided -eq 0) { Set-State "Načteno  •  hotovo 0 / $count" $cAccentBg $cAccent }
-        else { Set-State "Probíhá  •  hotovo $decided / $count" (RGB 254 243 199) (RGB 180 83 9) }
-        $lblPos.Text = "$($script:Index + 1) / $count"
+        if ($decided -eq 0) { Set-State "Načteno  •  hotovo 0 / $count" '#E0F7FA' '#0E7490' }
+        else { Set-State "Probíhá  •  hotovo $decided / $count" '#FEF3C7' '#B45309' }
+        $PosText.Text = "$($script:Index + 1) / $count"
         $item = $script:Items[$script:Index]
-        $lblCurrent.Text = $item.Value
-        $lblCurrent.ForeColor = $cText
+        $CurrentText.Text = $item.Value
+        $CurrentText.Foreground = $bText
         $info = if ($item.Note -ne '') { "Při Vymazat se zapíše: $($item.Note)" } else { 'Při Vymazat se nic nezapíše (poznámka je prázdná)' }
         switch ($item.Status) {
-            'keep' { $info = '✓ Ponecháno   •   ' + $info }
-            'del'  { $info = '✗ Vymazáno (zapsáno v poznámkách)   •   ' + $info }
+            'keep'   { $info = '✓ Ponecháno   •   ' + $info }
+            'del'    { $info = '✗ Vymazáno (zapsáno v poznámkách)   •   ' + $info }
             'unsure' { $info = '? Vrátit se později   •   ' + $info }
         }
         if ($item.Manual) { $info += '   •   vloženo ručně' }
-        $lblCurrentNote.Text = $info
+        $CurrentNote.Text = $info
     }
     Update-ListBox
 }
@@ -838,9 +540,9 @@ function Update-View {
 function Show-Current {
     Update-View
     if (-not $script:Done -and $script:Index -lt $script:Items.Count) {
-        $value = $script:Items[$script:Index].Value
-        try { [System.Windows.Forms.Clipboard]::SetText($value) }
-        catch { Show-Warn 'Hodnotu se nepodařilo zkopírovat do schránky (schránka je možná obsazená jinou aplikací).' }
+        if (-not (Set-ClipboardText $script:Items[$script:Index].Value)) {
+            Show-Warn 'Hodnotu se nepodařilo zkopírovat do schránky (schránka je možná obsazená jinou aplikací).'
+        }
     }
 }
 
@@ -889,13 +591,14 @@ function Set-Decision([string]$status) {
     Move-NextUndecided
 }
 
+# ---------- Poznámky a soubor ----------
 function Update-NotesCaption {
-    $lblNotes.Text = if ($script:NotesFile) { "Poznámky  •  $([System.IO.Path]::GetDirectoryName($script:NotesFile))" } else { 'Poznámky  •  zatím neuloženo' }
+    $NotesCaption.Text = if ($script:NotesFile) { "Poznámky  •  $([System.IO.Path]::GetDirectoryName($script:NotesFile))" } else { 'Poznámky  •  zatím neuloženo' }
 }
 
-# Název z pole „Název souboru“ (bez .txt); prázdný = $null
+# Název z pole „Název souboru“ (bez .txt); prázdný = $null, neplatný = $false
 function Get-WantedFileName {
-    $name = $txtFileName.Text.Trim()
+    $name = $FileNameBox.Text.Trim()
     if ($name.ToLower().EndsWith('.txt')) { $name = $name.Substring(0, $name.Length - 4).Trim() }
     if ($name -eq '') { return $null }
     if ($name.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
@@ -911,16 +614,15 @@ function Save-Notes([string]$path, [bool]$rename = $false) {
         $old = $script:NotesFile
         $renaming = ($rename -and $old -and ($old -ne $path) -and ([System.IO.Path]::GetDirectoryName($old) -eq [System.IO.Path]::GetDirectoryName($path)))
         if ($renaming -and [System.IO.File]::Exists($path) -and ($old.ToLower() -ne $path.ToLower())) {
-            $r = [System.Windows.Forms.MessageBox]::Show("Soubor $([System.IO.Path]::GetFileName($path)) už existuje. Přepsat ho?", 'Uložit', 'YesNo', 'Warning')
-            if ($r -ne 'Yes') { return }
+            if (-not (Ask-YesNo "Soubor $([System.IO.Path]::GetFileName($path)) už existuje. Přepsat ho?" 'Uložit' 'Warning')) { return }
         }
         $enc = New-Object System.Text.UTF8Encoding($true)
-        [System.IO.File]::WriteAllText($path, $txtNotes.Text, $enc)
+        [System.IO.File]::WriteAllText($path, $NotesBox.Text, $enc)
         if ($renaming -and ($old.ToLower() -ne $path.ToLower()) -and [System.IO.File]::Exists($old)) {
             [System.IO.File]::Delete($old)
         }
         $script:NotesFile = $path
-        $txtFileName.Text = [System.IO.Path]::GetFileNameWithoutExtension($path)
+        $FileNameBox.Text = [System.IO.Path]::GetFileNameWithoutExtension($path)
         Update-NotesCaption
         Show-Info "Poznámky byly uloženy do:`n$path"
     } catch {
@@ -929,90 +631,147 @@ function Save-Notes([string]$path, [bool]$rename = $false) {
 }
 
 function Save-NotesAs {
-    $sfd = New-Object System.Windows.Forms.SaveFileDialog
+    $wanted = Get-WantedFileName
+    if ($wanted -eq $false) { return }
+    $sfd = New-Object Microsoft.Win32.SaveFileDialog
     $sfd.Filter = 'Textový soubor (*.txt)|*.txt'
     $sfd.DefaultExt = 'txt'
     $sfd.AddExtension = $true
-    $wanted = Get-WantedFileName
-    if ($wanted -eq $false) { return }
     $sfd.FileName = if ($wanted) { $wanted } elseif ($script:NotesFile) { [System.IO.Path]::GetFileName($script:NotesFile) } else { 'poznamky.txt' }
     if ($script:NotesFile) { $sfd.InitialDirectory = [System.IO.Path]::GetDirectoryName($script:NotesFile) }
-    if ($sfd.ShowDialog($form) -eq 'OK') { Save-Notes $sfd.FileName }
-    $sfd.Dispose()
+    if ($sfd.ShowDialog($win) -eq $true) { Save-Notes $sfd.FileName }
 }
 
 # Počet řádků ve vstupním poli (koncové prázdné řádky se nepočítají)
 function Update-InputCount {
-    $lines = Get-ColumnLines $txtInput.Text
+    $lines = Get-ColumnLines $InputBox.Text
     $rows = @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Replace("`t", '')) })
     $text = "Řádků: $($rows.Count)"
-    $lblCount.ForeColor = $cText
+    $CountText.Foreground = $bText
     if ($rows.Count -gt 0 -and $rows[0].Split("`t").Count -lt 2) {
         $text = $text + '   •   jen 1 sloupec!'
-        $lblCount.ForeColor = $cWarn
+        $CountText.Foreground = $bWarn
     }
-    $lblCount.Text = $text
+    $CountText.Text = $text
 }
 
-$txtInput.Add_TextChanged({
-    if ($script:Highlighting) { return }
-    if ($txtInput.TextLength -eq 0) { $script:PastedCols = 0 }
-    Invoke-Safe { Update-InputCount } 'Počet řádků se nepodařilo spočítat.' })
-# Ctrl+V / Shift+Insert vloží jen čistý text (bez formátování z Excelu)
-$txtInput.Add_KeyDown({ param($s, $e)
-    if (($e.Control -and $e.KeyCode -eq 'V') -or ($e.Shift -and $e.KeyCode -eq 'Insert')) {
-        $e.SuppressKeyPress = $true
-        $e.Handled = $true
-        Invoke-Safe {
-            if ($script:Items.Count -gt 0) { Show-Warn 'Seznam už je vytvořený. Pro nové vložení ho nejdřív zrušte (Zrušit seznam).'; return }
-            if (-not [System.Windows.Forms.Clipboard]::ContainsText()) { return }
-            $r = Reduce-PastedColumns ([System.Windows.Forms.Clipboard]::GetText())
-            if ($r.Error) { Show-Error $r.Error; return }
-            $script:PastedCols = $r.Columns
-            $txtInput.SelectedText = $r.Text
-        } 'Vložení ze schránky se nezdařilo.'
-    }
+# ---------- Obsluha ovládacích prvků ----------
+$InputBox.Add_TextChanged({
+    if ($InputBox.Text.Length -eq 0) { $script:PastedCols = 0 }
+    Invoke-Safe { Update-InputCount } 'Počet řádků se nepodařilo spočítat.'
 })
 
-$btnLoad.Add_Click({ Invoke-Safe {
-    $parsed = ConvertFrom-Rows $txtInput.Text
+# Vložení (Ctrl+V, Shift+Insert, kontextová nabídka): jen čistý text a z každého řádku jen 1. a poslední sloupec
+$InputBox.AddHandler([System.Windows.Input.CommandManager]::PreviewExecutedEvent,
+    [System.Windows.Input.ExecutedRoutedEventHandler]{
+        param($s, $e)
+        if ($e.Command -ne [System.Windows.Input.ApplicationCommands]::Paste) { return }
+        $e.Handled = $true
+        Invoke-Safe {
+            if (-not [System.Windows.Clipboard]::ContainsText()) { return }
+            $r = Reduce-PastedColumns ([System.Windows.Clipboard]::GetText())
+            if ($r.Error) { Show-Error $r.Error; return }
+            $script:PastedCols = $r.Columns
+            $InputBox.SelectedText = $r.Text
+            $InputBox.CaretIndex = $InputBox.SelectionStart + $InputBox.SelectionLength
+            $InputBox.SelectionLength = 0
+        } 'Vložení ze schránky se nezdařilo.'
+    })
+
+$BtnLoad.Add_Click({ Invoke-Safe {
+    if ($script:Items.Count -gt 0) { Show-Warn 'Seznam už je vytvořený. Pro nové vložení ho nejdřív zrušte (Zrušit seznam).'; return }
+    $parsed = ConvertFrom-Rows $InputBox.Text
     if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
     if ($parsed.Items.Count -eq 0) { Show-Error 'Vstup neobsahuje žádný neprázdný řádek.'; return }
-
     $script:Items = $parsed.Items
     $script:Index = 0
     $script:Done = $false
     Show-Current
 } 'Seznam se nepodařilo načíst. Zkuste znovu zkopírovat data z Excelu.' })
 
-$btnOpen.Add_Click({ Invoke-Safe {
-    if ($txtNotes.Text.Trim() -ne '') {
-        $r = [System.Windows.Forms.MessageBox]::Show(
-            'Otevřením souboru se nahradí aktuální obsah poznámek.' + "`n`n" + 'Pokud ho chcete zachovat, nejdřív ho uložte. Pokračovat?',
-            'Otevřít soubor', 'YesNo', 'Question')
-        if ($r -ne 'Yes') { return }
+$BtnClear.Add_Click({ Invoke-Safe {
+    if (-not (Ask-YesNo ('Opravdu zrušit načtený seznam a vymazat vstupní pole?' + "`n`n" + 'Poznámky zůstanou beze změny.') 'Zrušit seznam')) { return }
+    $script:Items = New-Object System.Collections.Generic.List[object]
+    $script:Index = 0
+    $script:Done = $false
+    Update-View
+    $InputBox.Clear()
+} 'Seznam se nepodařilo vymazat.' })
+
+# Kliknutí nebo šipky v seznamu: vybraný řádek se stane aktuálním
+$ItemsList.Add_SelectionChanged({
+    if ($script:Syncing) { return }
+    Invoke-Safe {
+        $i = $ItemsList.SelectedIndex
+        if ($i -ge 0 -and $i -lt $script:Items.Count -and ($i -ne $script:Index -or $script:Done)) {
+            $script:Index = $i
+            $script:Done = $false
+            Show-Current
+        }
+    } 'Přechod na řádek se nezdařil.'
+})
+
+$BtnYes.Add_Click({ Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' })
+$BtnNo.Add_Click({ Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' })
+$BtnUnsure.Add_Click({ Invoke-Safe { Set-Decision 'unsure' } 'Označení se nezdařilo.' })
+$BtnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.' })
+$BtnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
+
+$BtnInsert.Add_Click({ Invoke-Safe {
+    if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
+    [xml]$dx = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="Vložit mezi" Width="460" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False" FontFamily="Segoe UI" FontSize="14" Background="White" UseLayoutRounding="True">
+  <StackPanel Margin="18">
+    <TextBlock Text="Údaj k ověření (povinné)" FontWeight="SemiBold"/>
+    <TextBox Name="T1" Margin="0,6,0,14" Padding="6,4"/>
+    <TextBlock Text="Poznámka při Vymazat (volitelné)" FontWeight="SemiBold"/>
+    <TextBox Name="T2" Margin="0,6,0,18" Padding="6,4"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Name="Ok" Content="Vložit" Width="96" Padding="0,6" Margin="0,0,8,0" IsDefault="True"/>
+      <Button Name="Cancel" Content="Zrušit" Width="96" Padding="0,6" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+'@
+    $dlg = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
+    $dlg.Owner = $win
+    $t1 = $dlg.FindName('T1'); $t2 = $dlg.FindName('T2')
+    $dlg.FindName('Ok').Add_Click({
+        if ($t1.Text.Trim() -eq '') { Show-Warn 'Vyplňte Údaj k ověření.' } else { $dlg.DialogResult = $true }
+    })
+    [void]$t1.Focus()
+    if ($dlg.ShowDialog() -eq $true) {
+        $script:Items.Insert($script:Index + 1, (New-Item2 $t1.Text.Trim() $t2.Text.Trim() $true))
+        Update-View   # aktuální řádek zůstává, mění se jen celkový počet
     }
-    $ofd = New-Object System.Windows.Forms.OpenFileDialog
+} 'Záznam se nepodařilo vložit.' })
+
+$BtnOpen.Add_Click({ Invoke-Safe {
+    if ($NotesBox.Text.Trim() -ne '') {
+        if (-not (Ask-YesNo ('Otevřením souboru se nahradí aktuální obsah poznámek.' + "`n`n" + 'Pokud ho chcete zachovat, nejdřív ho uložte. Pokračovat?') 'Otevřít soubor')) { return }
+    }
+    $ofd = New-Object Microsoft.Win32.OpenFileDialog
     $ofd.Filter = 'Textový soubor (*.txt)|*.txt|Všechny soubory (*.*)|*.*'
-    if ($ofd.ShowDialog($form) -eq 'OK') {
+    if ($ofd.ShowDialog($win) -eq $true) {
         try {
             $content = [System.IO.File]::ReadAllText($ofd.FileName, [System.Text.Encoding]::UTF8)
             $content = $content -replace "\r?\n", "`r`n"
             if ($content.Length -gt 0 -and -not $content.EndsWith("`n")) { $content += "`r`n" }
-            $txtNotes.Text = $content
-            $txtNotes.SelectionStart = $txtNotes.Text.Length
-            $txtNotes.ScrollToCaret()
+            $NotesBox.Text = $content
+            $NotesBox.CaretIndex = $NotesBox.Text.Length
+            $NotesBox.ScrollToEnd()
             $script:NotesFile = $ofd.FileName
-            $txtFileName.Text = [System.IO.Path]::GetFileNameWithoutExtension($ofd.FileName)
+            $FileNameBox.Text = [System.IO.Path]::GetFileNameWithoutExtension($ofd.FileName)
             Update-NotesCaption
         } catch {
             Show-Error 'Soubor se nepodařilo otevřít. Zkontrolujte, zda existuje a není otevřený jinou aplikací.'
         }
     }
-    $ofd.Dispose()
 } 'Soubor se nepodařilo otevřít.' })
 
-$btnSave.Add_Click({ Invoke-Safe {
+$BtnSave.Add_Click({ Invoke-Safe {
     # Uložit: do otevřeného souboru; když se změnil název, soubor se přejmenuje (ve stejné složce)
     $wanted = Get-WantedFileName
     if ($wanted -eq $false) { return }
@@ -1022,69 +781,7 @@ $btnSave.Add_Click({ Invoke-Safe {
     Save-Notes $target $true
 } 'Ukládání se nezdařilo.' })
 
-$btnSaveAs.Add_Click({ Invoke-Safe { Save-NotesAs } 'Ukládání se nezdařilo.' })
-
-$btnYes.Add_Click({ Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' })
-$btnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.' })
-$btnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
-
-$btnNo.Add_Click({ Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' })
-$btnUnsure.Add_Click({ Invoke-Safe { Set-Decision 'unsure' } 'Označení se nezdařilo.' })
-
-$btnInsert.Add_Click({ Invoke-Safe {
-    if ($script:Index -ge $script:Items.Count) { return }
-
-    $dlg = New-Object System.Windows.Forms.Form
-    $dlg.Text = 'Vložit mezi'
-    $dlg.FormBorderStyle = 'FixedDialog'
-    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
-    $dlg.StartPosition = 'CenterParent'
-    $dlg.ClientSize = New-Object System.Drawing.Size(460, 190)
-    $dlg.Font = $fontBase
-
-    $l1 = New-Object System.Windows.Forms.Label
-    $l1.Text = 'Údaj k ověření (povinné):'; $l1.SetBounds(12, 12, 430, 22)
-    $t1 = New-Object System.Windows.Forms.TextBox
-    $t1.SetBounds(12, 36, 434, 26)
-    $l2 = New-Object System.Windows.Forms.Label
-    $l2.Text = 'Poznámka při Vymazat (volitelné):'; $l2.SetBounds(12, 70, 430, 22)
-    $t2 = New-Object System.Windows.Forms.TextBox
-    $t2.SetBounds(12, 94, 434, 26)
-    $ok = New-Object System.Windows.Forms.Button
-    $ok.Text = 'Vložit'; $ok.SetBounds(256, 140, 90, 32)
-    $cancel = New-Object System.Windows.Forms.Button
-    $cancel.Text = 'Zrušit'; $cancel.SetBounds(356, 140, 90, 32)
-    $cancel.DialogResult = 'Cancel'
-    $ok.Add_Click({
-        if ($t1.Text.Trim() -eq '') {
-            Show-Warn 'Vyplňte Údaj k ověření.'
-        } else {
-            $dlg.DialogResult = 'OK'
-            $dlg.Close()
-        }
-    })
-    $dlg.Controls.AddRange(@($l1, $t1, $l2, $t2, $ok, $cancel))
-    $dlg.AcceptButton = $ok
-    $dlg.CancelButton = $cancel
-
-    if ($dlg.ShowDialog($form) -eq 'OK') {
-        $script:Items.Insert($script:Index + 1, (New-Item2 $t1.Text.Trim() $t2.Text.Trim() $true))
-        Update-View   # aktuální řádek zůstává, mění se jen celkový počet
-    }
-    $dlg.Dispose()
-} 'Záznam se nepodařilo vložit.' })
-
-$btnClear.Add_Click({ Invoke-Safe {
-    $r = [System.Windows.Forms.MessageBox]::Show(
-        'Opravdu zrušit načtený seznam a vymazat vstupní pole?' + "`n`n" + 'Nadpis a poznámky zůstanou beze změny.',
-        'Zrušit seznam', 'YesNo', 'Question')
-    if ($r -ne 'Yes') { return }
-    $script:Items = New-Object System.Collections.Generic.List[object]
-    $script:Index = 0
-    $script:Done = $false
-    Update-View          # odemkne vstupní pole
-    $txtInput.Clear()
-} 'Seznam se nepodařilo vymazat.' })
+$BtnSaveAs.Add_Click({ Invoke-Safe { Save-NotesAs } 'Ukládání se nezdařilo.' })
 
 # ---------- Vkládání Ctrl + kliknutím do jiné aplikace ----------
 # Globální sledování myši (funkce Windows, bez instalace). Při Ctrl + levém kliknutí
@@ -1207,42 +904,41 @@ public static class KlirencCtrlClick {
     $script:MiddleHookOk = $false
 }
 if (-not $script:MiddleHookOk) {
-    $chkMiddle.Checked = $false
-    $chkMiddle.Enabled = $false
-    $chkMiddle.Text = 'Vkládání Ctrl + kliknutím není na tomto počítači dostupné'
+    $ChkCtrl.IsChecked = $false
+    $ChkCtrl.IsEnabled = $false
+    $ChkCtrl.Content = 'Vkládání Ctrl + kliknutím není na tomto počítači dostupné'
 }
-
-$chkMiddle.Add_CheckedChanged({
-    if ($script:MiddleHookOk) { [KlirencCtrlClick]::Enabled = $chkMiddle.Checked }
+$ChkCtrl.Add_Click({
+    if ($script:MiddleHookOk) { [KlirencCtrlClick]::Enabled = [bool]$ChkCtrl.IsChecked }
 })
 
-# Po Ctrl + kliknutí: do schránky dát aktuální údaj a poslat Ctrl+V do okna, kde se kliklo
-$middleTimer = New-Object System.Windows.Forms.Timer
-$middleTimer.Interval = 40
-$middleTimer.Add_Tick({
+# Po Ctrl + kliknutí: do schránky dát aktuální údaj a vložit ho do pole, kam se kliklo
+$ctrlTimer = New-Object System.Windows.Threading.DispatcherTimer
+$ctrlTimer.Interval = [TimeSpan]::FromMilliseconds(40)
+$ctrlTimer.Add_Tick({
     try {
         if (-not $script:MiddleHookOk -or -not [KlirencCtrlClick]::Pending) { return }
         [KlirencCtrlClick]::Pending = $false
         if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
-        [System.Windows.Forms.Clipboard]::SetDataObject($script:Items[$script:Index].Value, $true, 5, 50)
-        Start-Sleep -Milliseconds 60
-        [KlirencCtrlClick]::ClickSelectAllPaste()
+        if (Set-ClipboardText $script:Items[$script:Index].Value) {
+            Start-Sleep -Milliseconds 60
+            [KlirencCtrlClick]::ClickSelectAllPaste()
+        }
     } catch { }
 })
-if ($script:MiddleHookOk) { $middleTimer.Start() }
+if ($script:MiddleHookOk) { $ctrlTimer.Start() }
 
-$form.Add_Shown({
+$win.Add_Loaded({
     try { Update-Shortcuts } catch { }
-    $split.SplitterDistance = [int]($form.ClientSize.Width * 0.6)
     Update-NotesCaption
     Update-View
+    [void]$InputBox.Focus()
 })
 
 try {
-    [void]$form.ShowDialog()
+    [void]$win.ShowDialog()
 } catch {
     Show-Error 'Aplikace narazila na neočekávaný problém a bude ukončena.'
 } finally {
-    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencCtrlClick]::Stop() } } catch { }
-    $form.Dispose()
+    try { $ctrlTimer.Stop(); if ($script:MiddleHookOk) { [KlirencCtrlClick]::Stop() } } catch { }
 }
