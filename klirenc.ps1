@@ -255,7 +255,7 @@ $lblPos.ForeColor = $cText
 $header.Controls.Add($lblApp, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
 $chkMiddle = New-Object System.Windows.Forms.CheckBox
-$chkMiddle.Text = 'Vkládat dvojklikem kolečka'
+$chkMiddle.Text = 'Vkládat Ctrl + kliknutím'
 $chkMiddle.AutoSize = $true
 $chkMiddle.Anchor = 'Right'
 $chkMiddle.Checked = $true
@@ -894,66 +894,48 @@ $btnClear.Add_Click({ Invoke-Safe {
     $txtInput.Clear()
 } 'Seznam se nepodařilo vymazat.' })
 
-# ---------- Vkládání dvojklikem kolečka myši do jiné aplikace ----------
-# Globální sledování myši (funkce Windows, bez instalace). Při dvojkliku prostředním tlačítkem
-# v jiném okně než klirenc se do něj vloží aktuální údaj (Ctrl+V).
+# ---------- Vkládání Ctrl + kliknutím do jiné aplikace ----------
+# Globální sledování myši (funkce Windows, bez instalace). Při Ctrl + levém kliknutí
+# v jiném okně než klirenc se do kliknutého pole vloží aktuální údaj (nahradí jeho obsah).
 $script:MiddleHookOk = $false
 try {
-    if (-not ('KlirencMiddleClick3' -as [type])) {
+    if (-not ('KlirencCtrlClick' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-public static class KlirencMiddleClick3 {
+public static class KlirencCtrlClick {
     private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MSLLHOOKSTRUCT { public int x; public int y; public uint mouseData; public uint flags; public uint time; public IntPtr extra; }
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData; public uint flags; public uint time; public IntPtr extra; }
 
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
     [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string name);
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
-    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
-
-    // Ctrl+V přes virtuální klávesy - nezávisí na rozložení klávesnice (SendKeys s českou klávesnicí zlobí)
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 
-    private static void CtrlKey(byte vk) {
-        const byte VK_CONTROL = 0x11;
-        const uint KEYUP = 0x0002;
-        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
-        keybd_event(vk, 0, 0, UIntPtr.Zero);
-        keybd_event(vk, 0, KEYUP, UIntPtr.Zero);
-        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
-    }
-
-    // Kliknutí levým tlačítkem na místo kurzoru (prostřední tlačítko pole většinou neaktivuje),
-    // označení obsahu pole (Ctrl+A) a vložení (Ctrl+V) - obsah pole se nahradí
-    public static void ClickSelectAllPaste() {
-        const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
-        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
-        System.Threading.Thread.Sleep(80);
-        CtrlKey(0x41);   // A
-        System.Threading.Thread.Sleep(30);
-        CtrlKey(0x56);   // V
-    }
-
     private const int WH_MOUSE_LL = 14;
-    private const int WM_MBUTTONDOWN = 0x0207;
-    private const int WM_MBUTTONUP = 0x0208;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_LBUTTONUP = 0x0202;
+    private const uint LLMHF_INJECTED = 0x01;
+    private const byte VK_CONTROL = 0x11;
+    private const uint KEYUP = 0x0002;
 
     private static HookProc proc = Callback;   // drží delegáta, aby ho neuklidil GC
     private static IntPtr hook = IntPtr.Zero;
-    private static uint lastTime = 0;
-    private static int lastX, lastY;
-    private static bool armed = false;
+    private static bool swallowedDown = false;
+    private static readonly uint ownPid = (uint)Process.GetCurrentProcess().Id;
 
     public static volatile bool Pending = false;
     public static volatile bool Enabled = true;
@@ -971,62 +953,88 @@ public static class KlirencMiddleClick3 {
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
     }
 
-    private static bool ForegroundIsOther() {
+    // Leží bod v okně jiné aplikace než klirenc?
+    private static bool PointIsOther(POINT pt) {
+        IntPtr w = GetAncestor(WindowFromPoint(pt), 2);
+        if (w == IntPtr.Zero) return false;
         uint pid;
-        GetWindowThreadProcessId(GetForegroundWindow(), out pid);
-        return pid != (uint)Process.GetCurrentProcess().Id;
+        GetWindowThreadProcessId(w, out pid);
+        return pid != 0 && pid != ownPid;
     }
 
+    // Ctrl + levé kliknutí v jiné aplikaci: původní kliknutí se zahodí (aby se neprovedla akce Ctrl+klik)
+    // a po puštění tlačítka se vloží aktuální údaj
     private static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam) {
         try {
             if (nCode >= 0 && Enabled) {
                 int msg = wParam.ToInt32();
-                if (msg == WM_MBUTTONDOWN) {
+                if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP) {
                     MSLLHOOKSTRUCT info = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
-                    uint dt = info.time - lastTime;
-                    bool near = Math.Abs(info.x - lastX) <= GetSystemMetrics(36) && Math.Abs(info.y - lastY) <= GetSystemMetrics(37);
-                    if (lastTime != 0 && dt <= GetDoubleClickTime() && near) {
-                        armed = true;
-                        lastTime = 0;
-                    } else {
-                        lastTime = info.time; lastX = info.x; lastY = info.y;
+                    if ((info.flags & LLMHF_INJECTED) == 0) {
+                        if (msg == WM_LBUTTONDOWN && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && PointIsOther(info.pt)) {
+                            swallowedDown = true;
+                            return (IntPtr)1;
+                        }
+                        if (msg == WM_LBUTTONUP && swallowedDown) {
+                            swallowedDown = false;
+                            Pending = true;
+                            return (IntPtr)1;
+                        }
                     }
-                } else if (msg == WM_MBUTTONUP && armed) {
-                    armed = false;
-                    if (ForegroundIsOther()) Pending = true;
                 }
             }
         } catch { }
         return CallNextHookEx(hook, nCode, wParam, lParam);
     }
+
+    private static void CtrlKey(byte vk) {
+        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+        keybd_event(vk, 0, 0, UIntPtr.Zero);
+        keybd_event(vk, 0, KEYUP, UIntPtr.Zero);
+        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
+    }
+
+    // Pustit Ctrl (uživatel ho ještě drží), obyčejně kliknout na místo kurzoru (aktivuje pole),
+    // označit obsah pole (Ctrl+A) a vložit (Ctrl+V) - obsah pole se nahradí
+    public static void ClickSelectAllPaste() {
+        const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
+        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(20);
+        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(80);
+        CtrlKey(0x41);   // A
+        System.Threading.Thread.Sleep(30);
+        CtrlKey(0x56);   // V
+    }
 }
 '@
     }
-    $script:MiddleHookOk = [KlirencMiddleClick3]::Start()
+    $script:MiddleHookOk = [KlirencCtrlClick]::Start()
 } catch {
     $script:MiddleHookOk = $false
 }
 if (-not $script:MiddleHookOk) {
     $chkMiddle.Checked = $false
     $chkMiddle.Enabled = $false
-    $chkMiddle.Text = 'Vkládání kolečkem není na tomto počítači dostupné'
+    $chkMiddle.Text = 'Vkládání Ctrl + kliknutím není na tomto počítači dostupné'
 }
 
 $chkMiddle.Add_CheckedChanged({
-    if ($script:MiddleHookOk) { [KlirencMiddleClick3]::Enabled = $chkMiddle.Checked }
+    if ($script:MiddleHookOk) { [KlirencCtrlClick]::Enabled = $chkMiddle.Checked }
 })
 
-# Po dvojkliku kolečkem: do schránky dát aktuální údaj a poslat Ctrl+V do okna, kde se kliklo
+# Po Ctrl + kliknutí: do schránky dát aktuální údaj a poslat Ctrl+V do okna, kde se kliklo
 $middleTimer = New-Object System.Windows.Forms.Timer
 $middleTimer.Interval = 40
 $middleTimer.Add_Tick({
     try {
-        if (-not $script:MiddleHookOk -or -not [KlirencMiddleClick3]::Pending) { return }
-        [KlirencMiddleClick3]::Pending = $false
+        if (-not $script:MiddleHookOk -or -not [KlirencCtrlClick]::Pending) { return }
+        [KlirencCtrlClick]::Pending = $false
         if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
         [System.Windows.Forms.Clipboard]::SetDataObject($script:Items[$script:Index].Value, $true, 5, 50)
         Start-Sleep -Milliseconds 60
-        [KlirencMiddleClick3]::ClickSelectAllPaste()
+        [KlirencCtrlClick]::ClickSelectAllPaste()
     } catch { }
 })
 if ($script:MiddleHookOk) { $middleTimer.Start() }
@@ -1042,6 +1050,6 @@ try {
 } catch {
     Show-Error 'Aplikace narazila na neočekávaný problém a bude ukončena.'
 } finally {
-    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencMiddleClick3]::Stop() } } catch { }
+    try { $middleTimer.Stop(); if ($script:MiddleHookOk) { [KlirencCtrlClick]::Stop() } } catch { }
     $form.Dispose()
 }
