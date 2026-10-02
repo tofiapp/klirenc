@@ -8,7 +8,7 @@ Lokální pomocník pro Windows (PowerShell + WinForms) pro ruční procházení
 `spustit.cmd` dělá totéž, jen na okamžik problikne příkazový řádek.
 Dvojklik přímo na `klirenc.ps1` ho ve Windows jen otevře v Poznámkovém bloku.
 
-**Ikona KC:** jednou dvakrát klikněte na `vytvorit-zastupce.vbs`. Ve složce aplikace a na ploše se vytvoří zástupce **Kontrola Clearance** s ikonou KC, kterým pak aplikaci spouštíte. Pokud složku s aplikací přesunete, spusťte `vytvorit-zastupce.vbs` znovu.
+**Zástupce s ikonou KC:** při každém spuštění aplikace se automaticky vytvoří nebo opraví zástupce **Kontrola Clearance** ve složce aplikace a na ploše. Vždy vede na aktuální složku. Pokud je zástupce připnutý na hlavním panelu, opraví se také. Číslo verze je vidět v titulku okna.
 
 Nebo z příkazového řádku ve složce se skriptem:
 
