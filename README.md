@@ -4,7 +4,10 @@ Lokální pomocník pro Windows (PowerShell + WinForms) pro ruční procházení
 
 ## Spuštění
 
-Ve složce se skriptem:
+**Dvojklikem na `spustit.cmd`** (musí být ve stejné složce jako `klirenc.ps1`).
+Dvojklik přímo na `klirenc.ps1` ho ve Windows jen otevře v Poznámkovém bloku.
+
+Nebo z příkazového řádku ve složce se skriptem:
 
 ```
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
