@@ -1,4 +1,4 @@
-# klirenc
+# Kontrola Clearance
 
 Lokální pomocník pro Windows (PowerShell + WinForms) pro ruční procházení řádků zkopírovaných z Excelu. Funguje offline, nic se neinstaluje a nepotřebuje admin práva. Data se na disk zapisují jen tehdy, když sami uložíte poznámky.
 
@@ -27,7 +27,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - **? Vrátit se později** označí řádek ?. Takové řádky přijdou na řadu, až nezbude žádný nerozhodnutý.
    - Po rozhodnutí se automaticky přejde na další nerozhodnutý řádek.
    - Šipkami **▲ ▼**, kliknutím na řádek v seznamu nebo klávesami ↑ ↓ v seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku odebere.
-5. **Vkládání do jiné aplikace:** dokud klirenc běží (i na pozadí), **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem **Vkládat Ctrl + kliknutím** nahoře.
+5. **Vkládání do jiné aplikace:** dokud aplikace běží (i na pozadí), **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem **Vkládat Ctrl + kliknutím** nahoře.
 5b. **+ Vložit mezi** přidá nový záznam hned za aktuální řádek. Aktuální řádek se nezmění.
 6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
 7. Ukládání (vždy UTF-8 `.txt`, v aplikaci se nic nemaže):

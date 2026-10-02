@@ -1,4 +1,4 @@
-﻿# klirenc - pracovní pomocník pro ruční procházení řádků z Excelu
+﻿# Kontrola Clearance - pracovní pomocník pro ruční procházení řádků z Excelu
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -20,9 +20,9 @@ function New-Item2([string]$value, [string]$note, [bool]$manual = $false) {
     [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual }
 }
 
-function Show-Info([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'klirenc', 'OK', 'Information') }
-function Show-Warn([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'klirenc', 'OK', 'Warning') }
-function Show-Error([string]$text) { [void][System.Windows.Forms.MessageBox]::Show($text, 'klirenc', 'OK', 'Error') }
+function Show-Info([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', 'Information') }
+function Show-Warn([string]$text)  { [void][System.Windows.Forms.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', 'Warning') }
+function Show-Error([string]$text) { [void][System.Windows.Forms.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', 'Error') }
 
 # Bezpečné spuštění obsluhy události - uživateli se nezobrazí technická chyba
 function Invoke-Safe([scriptblock]$action, [string]$message) {
@@ -215,7 +215,37 @@ function New-Caption([string]$text) {
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'klirenc'
+$form.Text = 'Kontrola Clearance'
+
+# Ikona „KC“ kreslená přímo v aplikaci (bez souboru): zaoblený čtverec s bílým písmem
+function New-KcBitmap([int]$size) {
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = 'AntiAlias'
+    $g.TextRenderingHint = 'AntiAliasGridFit'
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $r = [Math]::Max(2, [int]($size * 0.22)); $d = 2 * $r; $w = $size - 1
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $path.AddArc(0, 0, $d, $d, 180, 90)
+    $path.AddArc($w - $d, 0, $d, $d, 270, 90)
+    $path.AddArc($w - $d, $w - $d, $d, $d, 0, 90)
+    $path.AddArc(0, $w - $d, $d, $d, 90, 90)
+    $path.CloseFigure()
+    $rect = New-Object System.Drawing.Rectangle(0, 0, $size, $size)
+    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, (RGB 99 102 241), (RGB 67 56 202), 45.0)
+    $g.FillPath($brush, $path)
+    $font = New-Object System.Drawing.Font('Segoe UI', [float]($size * 0.40), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $fmt = New-Object System.Drawing.StringFormat
+    $fmt.Alignment = 'Center'; $fmt.LineAlignment = 'Center'
+    $rf = New-Object System.Drawing.RectangleF(0, [float]($size * 0.02), $size, $size)
+    $g.DrawString('KC', $font, [System.Drawing.Brushes]::White, $rf, $fmt)
+    $font.Dispose(); $brush.Dispose(); $path.Dispose(); $g.Dispose()
+    $bmp
+}
+try {
+    $iconBmp = New-KcBitmap 64
+    $form.Icon = [System.Drawing.Icon]::FromHandle($iconBmp.GetHicon())
+} catch { }
 $form.Size = New-Object System.Drawing.Size(1200, 820)
 $form.MinimumSize = New-Object System.Drawing.Size(950, 650)
 $form.StartPosition = 'CenterScreen'
@@ -235,7 +265,7 @@ $header.Padding = New-Object System.Windows.Forms.Padding(16, 0, 16, 0)
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 $lblApp = New-Object System.Windows.Forms.Label
-$lblApp.Text = '◆ klirenc'
+$lblApp.Text = 'Kontrola Clearance'
 $lblApp.AutoSize = $true
 $lblApp.Anchor = 'Left'
 $lblApp.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
@@ -252,7 +282,24 @@ $lblPos.AutoSize = $true
 $lblPos.Anchor = 'Right'
 $lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $lblPos.ForeColor = $cText
-$header.Controls.Add($lblApp, 0, 0)
+$lblApp.Anchor = 'None'
+$lblApp.Margin = New-Object System.Windows.Forms.Padding(6, 0, 0, 0)
+$picLogo = New-Object System.Windows.Forms.PictureBox
+$picLogo.Size = New-Object System.Drawing.Size(34, 34)
+$picLogo.SizeMode = 'Zoom'
+$picLogo.Anchor = 'None'
+$picLogo.Margin = New-Object System.Windows.Forms.Padding(0)
+try { $picLogo.Image = New-KcBitmap 68 } catch { }
+$appBox = New-Object System.Windows.Forms.TableLayoutPanel
+$appBox.AutoSize = $true
+$appBox.AutoSizeMode = 'GrowAndShrink'
+$appBox.ColumnCount = 2
+$appBox.RowCount = 1
+$appBox.Anchor = 'Left'
+$appBox.Margin = New-Object System.Windows.Forms.Padding(0)
+$appBox.Controls.Add($picLogo, 0, 0)
+$appBox.Controls.Add($lblApp, 1, 0)
+$header.Controls.Add($appBox, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
 $chkMiddle = New-Object System.Windows.Forms.CheckBox
 $chkMiddle.Text = 'Vkládat Ctrl + kliknutím'
@@ -896,7 +943,7 @@ $btnClear.Add_Click({ Invoke-Safe {
 
 # ---------- Vkládání Ctrl + kliknutím do jiné aplikace ----------
 # Globální sledování myši (funkce Windows, bez instalace). Při Ctrl + levém kliknutí
-# v jiném okně než klirenc se do kliknutého pole vloží aktuální údaj (nahradí jeho obsah).
+# v jiném okně než této aplikace se do kliknutého pole vloží aktuální údaj (nahradí jeho obsah).
 $script:MiddleHookOk = $false
 try {
     if (-not ('KlirencCtrlClick' -as [type])) {
@@ -953,7 +1000,7 @@ public static class KlirencCtrlClick {
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
     }
 
-    // Leží bod v okně jiné aplikace než klirenc?
+    // Leží bod v okně jiné aplikace než tato aplikace?
     private static bool PointIsOther(POINT pt) {
         IntPtr w = GetAncestor(WindowFromPoint(pt), 2);
         if (w == IntPtr.Zero) return false;
