@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '20'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '21'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -132,15 +132,30 @@ function ConvertFrom-Rows([string]$text, [bool]$manual = $false) {
     return @{ Ok = $true; Items = $result }
 }
 
-# Seřadí záznamy do složek: pořadí složek podle prvního výskytu, uvnitř složky původní pořadí
+# Klíč pro řazení složek: datum RRMMDD z názvu složky (první šestice číslic). Bez data = $null.
+function Get-CategoryDateKey([string]$category) {
+    if ($category -match '(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)') {
+        $m = [int]$Matches[2]; $d = [int]$Matches[3]
+        if ($m -ge 1 -and $m -le 12 -and $d -ge 1 -and $d -le 31) { return $Matches[1] + $Matches[2] + $Matches[3] }
+    }
+    return $null
+}
+
+# Seřadí záznamy do složek. Složky jsou seřazené podle data RRMMDD v názvu od nejstarší;
+# složky bez data jsou na konci v pořadí prvního výskytu. Uvnitř složky zůstává původní pořadí.
 function Group-Items($list) {
     $groups = [ordered]@{}
     foreach ($it in $list) {
         if (-not $groups.Contains($it.Category)) { $groups[$it.Category] = New-Object System.Collections.Generic.List[object] }
         $groups[$it.Category].Add($it)
     }
+    $pos = 0
+    $keys = foreach ($k in $groups.Keys) {
+        $dk = Get-CategoryDateKey $k
+        [pscustomobject]@{ Name = $k; NoDate = [int]($null -eq $dk); Date = [string]$dk; Pos = $pos++ }
+    }
     $out = New-Object System.Collections.Generic.List[object]
-    foreach ($k in $groups.Keys) { $out.AddRange($groups[$k]) }
+    foreach ($k in @($keys | Sort-Object NoDate, Date, Pos)) { $out.AddRange($groups[$k.Name]) }
     return ,$out
 }
 
@@ -793,7 +808,7 @@ $BtnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.
 $BtnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
 
 # Vložit mezi: vloží se řádky z Excelu stejně jako do hlavního pole (Ctrl+V), zařadí se za aktuální řádek
-# (každý do své složky); aktuální řádek se nemění
+# do stejné složky jako aktuální řádek; aktuální řádek se nemění
 $BtnInsert.Add_Click({ Invoke-Safe {
     if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
     [xml]$dx = @'
@@ -802,7 +817,7 @@ $BtnInsert.Add_Click({ Invoke-Safe {
         ShowInTaskbar="False" FontFamily="Segoe UI" FontSize="14" Background="White" UseLayoutRounding="True">
   <Grid Margin="18">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <TextBlock Text="Vložte řádky z Excelu (Ctrl+V) – zařadí se hned za aktuální řádek, každý do své složky." TextWrapping="Wrap" Foreground="#475569"/>
+    <TextBlock Text="Vložte řádky z Excelu (Ctrl+V) – zařadí se hned pod aktuální řádek (do jeho složky)." TextWrapping="Wrap" Foreground="#475569"/>
     <TextBox Name="Box" Grid.Row="1" Margin="0,10,0,10" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
              FontFamily="Consolas" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" Padding="8,6"
              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
@@ -850,6 +865,8 @@ $BtnInsert.Add_Click({ Invoke-Safe {
         $current = $script:Items[$script:Index]
         $list = New-Object System.Collections.Generic.List[object]
         $list.AddRange($script:Items)
+        # vložené řádky patří do složky aktuálního řádku, aby se objevily přímo pod ním
+        foreach ($it in $script:InsertParsed) { $it.Category = $current.Category }
         $list.InsertRange($script:Index + 1, $script:InsertParsed)
         $script:Items = Group-Items $list
         $script:Index = $script:Items.IndexOf($current)   # aktuální řádek zůstává stejný
