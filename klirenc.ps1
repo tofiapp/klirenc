@@ -1,7 +1,7 @@
 ﻿# Kontrola Clearance - pracovní pomocník pro ruční procházení řádků z Excelu
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 
-# -VytvoritZastupce: jen vytvoří ikonu kc.ico a zástupce „Kontrola Clearance“ (ve složce a na ploše) a skončí
+# -VytvoritZastupce: jen vytvoří ikonu (kc-petrol.ico) a zástupce „Kontrola Clearance“ (ve složce a na ploše) a skončí
 param([switch]$VytvoritZastupce)
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -372,7 +372,10 @@ function Save-KcIco([string]$path) {
 if ($VytvoritZastupce) {
     try {
         $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
-        $ico = Join-Path $dir 'kc.ico'
+        # nový název souboru při změně vzhledu ikony - Windows si ikony pamatují podle cesty a jinak by ukazovaly starou
+        $ico = Join-Path $dir 'kc-petrol.ico'
+        $oldIco = Join-Path $dir 'kc.ico'
+        if (Test-Path $oldIco) { Remove-Item $oldIco -ErrorAction SilentlyContinue }
         Save-KcIco $ico
         $shell = New-Object -ComObject WScript.Shell
         $targets = @((Join-Path $dir 'Kontrola Clearance.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Kontrola Clearance.lnk'))
