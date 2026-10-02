@@ -1,8 +1,7 @@
 ﻿# Kontrola Clearance - pracovní pomocník pro ruční procházení řádků z Excelu
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 
-# -VytvoritZastupce: jen vytvoří ikonu (kc-petrol.ico) a zástupce „Kontrola Clearance“ (ve složce a na ploše) a skončí
-param([switch]$VytvoritZastupce)
+$script:AppVersion = '18'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -89,9 +88,15 @@ public class KcButton : Button {
             g.FillPath(b, path);
         }
         Color fc = Enabled ? ForeColor : Color.FromArgb(140, ForeColor);
-        TextRenderer.DrawText(g, Text, Font, ClientRectangle, fc, fill,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-            TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        using (StringFormat sf = new StringFormat())
+        using (SolidBrush tb = new SolidBrush(fc)) {
+            sf.Alignment = StringAlignment.Center;
+            sf.LineAlignment = StringAlignment.Center;
+            sf.Trimming = StringTrimming.EllipsisCharacter;
+            sf.FormatFlags = StringFormatFlags.NoWrap;
+            g.DrawString(Text, Font, tb, new RectangleF(0, 0, Width, Height), sf);
+        }
     }
 }
 
@@ -306,7 +311,7 @@ function New-Caption([string]$text) {
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Kontrola Clearance'
+$form.Text = "Kontrola Clearance  –  verze $($script:AppVersion)"
 
 # Ikona „KC“ kreslená přímo v aplikaci (bez souboru): zaoblený čtverec s bílým písmem
 function New-KcBitmap([int]$size) {
@@ -369,31 +374,39 @@ function Save-KcIco([string]$path) {
     $bw.Close()
 }
 
-if ($VytvoritZastupce) {
-    try {
-        $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
-        # nový název souboru při změně vzhledu ikony - Windows si ikony pamatují podle cesty a jinak by ukazovaly starou
-        $ico = Join-Path $dir 'kc-petrol.ico'
-        $oldIco = Join-Path $dir 'kc.ico'
-        if (Test-Path $oldIco) { Remove-Item $oldIco -ErrorAction SilentlyContinue }
+# Zástupce „Kontrola Clearance“ s ikonou KC se udržuje automaticky při každém spuštění:
+# vždy vede na tuto složku (i po přesunu nebo nahrání nové verze) a má aktuální ikonu.
+# Ve složce aplikace a na ploše se vytvoří, připnutý zástupce na hlavním panelu se jen opraví.
+function Update-Shortcuts {
+    $dir = Split-Path -Parent $script:MyPath
+    $ico = Join-Path $dir "kc-$($script:AppVersion).ico"     # název s verzí: Windows si ikony pamatují podle cesty
+    if (-not (Test-Path $ico)) {
+        Get-ChildItem -Path $dir -Filter 'kc*.ico' -ErrorAction SilentlyContinue | Remove-Item -ErrorAction SilentlyContinue
         Save-KcIco $ico
-        $shell = New-Object -ComObject WScript.Shell
-        $targets = @((Join-Path $dir 'Kontrola Clearance.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Kontrola Clearance.lnk'))
-        foreach ($lnkPath in $targets) {
-            $lnk = $shell.CreateShortcut($lnkPath)
+    }
+    $shell = New-Object -ComObject WScript.Shell
+    $name = 'Kontrola Clearance.lnk'
+    $pinned = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\$name"
+    $targets = @(
+        @{ Path = (Join-Path $dir $name); Create = $true },
+        @{ Path = (Join-Path ([Environment]::GetFolderPath('Desktop')) $name); Create = $true },
+        @{ Path = $pinned; Create = $false }
+    )
+    foreach ($t in $targets) {
+        try {
+            if (-not $t.Create -and -not (Test-Path $t.Path)) { continue }
+            $lnk = $shell.CreateShortcut($t.Path)
             $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
             $lnk.Arguments = '"' + (Join-Path $dir 'spustit.vbs') + '"'
             $lnk.WorkingDirectory = $dir
             $lnk.IconLocation = "$ico,0"
             $lnk.Description = 'Kontrola Clearance'
             $lnk.Save()
-        }
-        Show-Info "Zástupce „Kontrola Clearance“ s ikonou KC byl vytvořen ve složce aplikace a na ploše."
-    } catch {
-        Show-Error 'Zástupce se nepodařilo vytvořit. Zkontrolujte, zda máte do složky aplikace právo zápisu.'
+        } catch { }
     }
-    return
 }
+$script:MyPath = $MyInvocation.MyCommand.Path
+
 $form.Size = New-Object System.Drawing.Size(1200, 820)
 $form.MinimumSize = New-Object System.Drawing.Size(950, 650)
 $form.StartPosition = 'CenterScreen'
@@ -1219,6 +1232,7 @@ $middleTimer.Add_Tick({
 if ($script:MiddleHookOk) { $middleTimer.Start() }
 
 $form.Add_Shown({
+    try { Update-Shortcuts } catch { }
     $split.SplitterDistance = [int]($form.ClientSize.Width * 0.6)
     Update-NotesCaption
     Update-View
