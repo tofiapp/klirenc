@@ -161,8 +161,9 @@ function New-Button([string]$text, $back, $fore) {
     $b.Text = $text
     $b.AutoSize = $true
     $b.Height = 36
+    $b.MinimumSize = New-Object System.Drawing.Size(0, 36)
     $b.Padding = New-Object System.Windows.Forms.Padding(12, 2, 12, 2)
-    $b.Margin = New-Object System.Windows.Forms.Padding(0, 3, 8, 3)
+    $b.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 6)
     Set-FlatButton $b $back $fore
     Set-Rounded $b 8
     $b
@@ -275,7 +276,7 @@ $left.RowCount = 4
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # import
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # aktuální hodnota
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 88)))   # Ponechat / Vymazat
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 48)))   # vedlejší akce
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))       # vedlejší akce
 $split.Panel1.Controls.Add($left)
 
 # Import: jedno pole, do kterého se vloží řádky z Excelu (použije se 1. a poslední sloupec)
@@ -287,7 +288,7 @@ $importGrid.Dock = 'Fill'
 $importGrid.ColumnCount = 1
 $importGrid.RowCount = 2
 [void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
-[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 46)))
+[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
 $importCard.Inner.Controls.Add($importGrid)
 
 # RichTextBox kvůli zvýraznění aktuálního řádku
@@ -304,6 +305,8 @@ $txtInput.BackColor = $cInput
 
 $importPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $importPanel.Dock = 'Fill'
+$importPanel.AutoSize = $true
+$importPanel.AutoSizeMode = 'GrowAndShrink'
 $importPanel.WrapContents = $false
 $importPanel.Padding = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
 $btnLoad = New-Button 'Vytvořit seznam' $cAccent $cWhite
@@ -385,6 +388,8 @@ $left.Controls.Add($actionPanel, 0, 2)
 # Vedlejší akce: malá tlačítka uprostřed pod hlavními
 $secondaryPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $secondaryPanel.Dock = 'Fill'
+$secondaryPanel.AutoSize = $true
+$secondaryPanel.AutoSizeMode = 'GrowAndShrink'
 $secondaryPanel.ColumnCount = 4
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
@@ -408,10 +413,10 @@ $right.Dock = 'Fill'
 $right.ColumnCount = 1
 $right.RowCount = 5
 [void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 26)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 40)))
+[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
 [void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 30)))
 [void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
-[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 46)))
+[void]$right.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('AutoSize')))
 $notesCard.Inner.Controls.Add($right)
 
 $lblTitle = New-Object System.Windows.Forms.Label
@@ -420,6 +425,8 @@ $lblTitle.Dock = 'Fill'
 $lblTitle.Font = $fontHead
 $titleRow = New-Object System.Windows.Forms.TableLayoutPanel
 $titleRow.Dock = 'Fill'
+$titleRow.AutoSize = $true
+$titleRow.AutoSizeMode = 'GrowAndShrink'
 $titleRow.ColumnCount = 2
 [void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
 [void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
@@ -450,6 +457,8 @@ $txtNotes.BorderStyle = 'None'
 $txtNotes.BackColor = $cInput
 $saveRow = New-Object System.Windows.Forms.FlowLayoutPanel
 $saveRow.Dock = 'Fill'
+$saveRow.AutoSize = $true
+$saveRow.AutoSizeMode = 'GrowAndShrink'
 $saveRow.WrapContents = $false
 $saveRow.Padding = New-Object System.Windows.Forms.Padding(0, 6, 0, 0)
 $btnOpen = New-GhostButton 'Otevřít soubor…'
