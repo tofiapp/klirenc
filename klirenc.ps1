@@ -1,6 +1,9 @@
 ﻿# Kontrola Clearance - pracovní pomocník pro ruční procházení řádků z Excelu
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 
+# -VytvoritZastupce: jen vytvoří ikonu kc.ico a zástupce „Kontrola Clearance“ (ve složce a na ploše) a skončí
+param([switch]$VytvoritZastupce)
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -246,6 +249,46 @@ try {
     $iconBmp = New-KcBitmap 64
     $form.Icon = [System.Drawing.Icon]::FromHandle($iconBmp.GetHicon())
 } catch { }
+
+# Uloží ikonu KC jako .ico (obrázek PNG 256×256 uvnitř souboru ICO)
+function Save-KcIco([string]$path) {
+    $bmp = New-KcBitmap 256
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    $png = $ms.ToArray()
+    $ms.Dispose(); $bmp.Dispose()
+    $fs = [System.IO.File]::Create($path)
+    $bw = New-Object System.IO.BinaryWriter($fs)
+    $bw.Write([UInt16]0); $bw.Write([UInt16]1); $bw.Write([UInt16]1)       # hlavička: typ ikona, 1 obrázek
+    $bw.Write([byte]0); $bw.Write([byte]0); $bw.Write([byte]0); $bw.Write([byte]0)   # 256×256, bez palety
+    $bw.Write([UInt16]1); $bw.Write([UInt16]32)                              # roviny, bitů na pixel
+    $bw.Write([UInt32]$png.Length); $bw.Write([UInt32]22)                    # velikost dat, posun dat
+    $bw.Write($png)
+    $bw.Close()
+}
+
+if ($VytvoritZastupce) {
+    try {
+        $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+        $ico = Join-Path $dir 'kc.ico'
+        Save-KcIco $ico
+        $shell = New-Object -ComObject WScript.Shell
+        $targets = @((Join-Path $dir 'Kontrola Clearance.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Kontrola Clearance.lnk'))
+        foreach ($lnkPath in $targets) {
+            $lnk = $shell.CreateShortcut($lnkPath)
+            $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+            $lnk.Arguments = '"' + (Join-Path $dir 'spustit.vbs') + '"'
+            $lnk.WorkingDirectory = $dir
+            $lnk.IconLocation = "$ico,0"
+            $lnk.Description = 'Kontrola Clearance'
+            $lnk.Save()
+        }
+        Show-Info "Zástupce „Kontrola Clearance“ s ikonou KC byl vytvořen ve složce aplikace a na ploše."
+    } catch {
+        Show-Error 'Zástupce se nepodařilo vytvořit. Zkontrolujte, zda máte do složky aplikace právo zápisu.'
+    }
+    return
+}
 $form.Size = New-Object System.Drawing.Size(1200, 820)
 $form.MinimumSize = New-Object System.Drawing.Size(950, 650)
 $form.StartPosition = 'CenterScreen'
