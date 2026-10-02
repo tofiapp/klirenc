@@ -6,7 +6,27 @@ param([switch]$VytvoritZastupce)
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+# Ostré vykreslení při zvětšení zobrazení ve Windows (125 %, 150 % …): bez tohoto Windows aplikaci
+# vykreslí v malém a roztáhnou ji, takže vypadá rozmazaně a „kostičkovaně“. Musí proběhnout před vytvořením oken.
+try {
+    if (-not ('KcDpi' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class KcDpi {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+}
+'@
+    }
+    try { [void][KcDpi]::SetProcessDpiAwareness(2) } catch { [void][KcDpi]::SetProcessDPIAware() }
+} catch { }
 [System.Windows.Forms.Application]::EnableVisualStyles()
+
+# Měřítko obrazovky (1 = 100 %, 1.25 = 125 % …) pro ruční rozměry v pixelech
+$script:S = 1.0
+try { $gd = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero); $script:S = $gd.DpiX / 96.0; $gd.Dispose() } catch { }
+function Px([double]$n) { [int][Math]::Round($n * $script:S) }
 
 # ---------- Stav ----------
 $script:Items = New-Object System.Collections.Generic.List[object]
@@ -130,7 +150,7 @@ function Get-Shade($c, [double]$f) {
 $script:RoundHandler = {
     param($s, $e)
     try {
-        $r = [int]$s.Tag
+        $r = [int]([int]$s.Tag * $script:S)
         $w = $s.Width; $h = $s.Height
         if ($w -le 2 * $r -or $h -le 2 * $r) { return }
         $d = 2 * $r
@@ -307,6 +327,9 @@ $form.Size = New-Object System.Drawing.Size(1200, 820)
 $form.MinimumSize = New-Object System.Drawing.Size(950, 650)
 $form.StartPosition = 'CenterScreen'
 $form.Font = $fontBase
+# Pevné rozměry v pixelech (výšky řádků, okraje …) se přepočtou podle měřítka obrazovky
+$form.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
+$form.AutoScaleMode = 'Dpi'
 $form.BackColor = $cBg
 $form.ForeColor = $cText
 
@@ -419,7 +442,7 @@ $importPanel.Controls.AddRange(@($btnLoad, $btnClear, $lblCount))
 $lstItems = New-Object System.Windows.Forms.ListBox
 $lstItems.Dock = 'Fill'
 $lstItems.DrawMode = 'OwnerDrawFixed'
-$lstItems.ItemHeight = 28
+$lstItems.ItemHeight = Px 28
 $lstItems.IntegralHeight = $false
 $lstItems.BorderStyle = 'None'
 $lstItems.BackColor = $cInput
@@ -626,7 +649,7 @@ $lstItems.Add_DrawItem({ param($s, $e)
         $bb.Dispose()
         if ($isCur) {
             $ab = New-Object System.Drawing.SolidBrush($cAccent)
-            $g.FillRectangle($ab, $r.X, $r.Y, 4, $r.Height)
+            $g.FillRectangle($ab, $r.X, $r.Y, (Px 4), $r.Height)
             $ab.Dispose()
         }
         $flags = [System.Windows.Forms.TextFormatFlags]'VerticalCenter, EndEllipsis, NoPrefix, SingleLine'
@@ -636,12 +659,12 @@ $lstItems.Add_DrawItem({ param($s, $e)
             'del'    { $mark = '✗'; $markColor = $cNo }
             'unsure' { $mark = '?'; $markColor = $cUnsure }
         }
-        $wRest = [Math]::Max(10, $r.Width - 80)
+        $wRest = [Math]::Max(10, $r.Width - (Px 80))
         $wVal = [int]($wRest * 0.45)
-        $numRect  = New-Object System.Drawing.Rectangle(($r.X + 8), $r.Y, 40, $r.Height)
-        $markRect = New-Object System.Drawing.Rectangle(($r.X + 48), $r.Y, 24, $r.Height)
-        $valRect  = New-Object System.Drawing.Rectangle(($r.X + 76), $r.Y, $wVal, $r.Height)
-        $noteRect = New-Object System.Drawing.Rectangle(($r.X + 84 + $wVal), $r.Y, ($wRest - $wVal - 8), $r.Height)
+        $numRect  = New-Object System.Drawing.Rectangle(($r.X + (Px 8)), $r.Y, (Px 40), $r.Height)
+        $markRect = New-Object System.Drawing.Rectangle(($r.X + (Px 48)), $r.Y, (Px 24), $r.Height)
+        $valRect  = New-Object System.Drawing.Rectangle(($r.X + (Px 76)), $r.Y, $wVal, $r.Height)
+        $noteRect = New-Object System.Drawing.Rectangle(($r.X + (Px 84) + $wVal), $r.Y, ($wRest - $wVal - (Px 8)), $r.Height)
         [System.Windows.Forms.TextRenderer]::DrawText($g, "$($e.Index + 1)", $fontSmall, $numRect, $cMuted, $flags)
         [System.Windows.Forms.TextRenderer]::DrawText($g, $mark, $fontState, $markRect, $markColor, $flags)
         $valFont = if ($isCur) { $fontHead } else { $fontBase }
