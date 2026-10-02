@@ -180,12 +180,10 @@ function New-BigButton([string]$text, $back, $fore, $font) {
     $b
 }
 
-# Světlé tlačítko s rámečkem
-function New-GhostButton([string]$text) {
-    $b = New-Button $text $cCard $cText
-    $b.FlatAppearance.BorderSize = 1
-    $b.FlatAppearance.BorderColor = $cBorder
-    $b
+# Světlé vedlejší tlačítko
+function New-GhostButton([string]$text, $back = $null) {
+    if ($null -eq $back) { $back = RGB 232 237 244 }
+    New-Button $text $back $cText
 }
 
 function New-Card {
@@ -287,17 +285,11 @@ $left.Controls.Add($importCard.Outer, 0, 0)
 $importGrid = New-Object System.Windows.Forms.TableLayoutPanel
 $importGrid.Dock = 'Fill'
 $importGrid.ColumnCount = 1
-$importGrid.RowCount = 3
-[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 26)))
+$importGrid.RowCount = 2
 [void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
 [void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 46)))
 $importCard.Inner.Controls.Add($importGrid)
 
-$lblInput = New-Object System.Windows.Forms.Label
-$lblInput.Text = 'Řádky z Excelu (Ctrl+V) – použije se 1. sloupec (Údaj k ověření) a poslední sloupec (Poznámka při Vymazat)'
-$lblInput.Dock = 'Fill'
-$lblInput.Font = $fontHead
-$lblInput.AutoEllipsis = $true
 # RichTextBox kvůli zvýraznění aktuálního řádku
 $txtInput = New-Object System.Windows.Forms.RichTextBox
 $txtInput.Multiline = $true
@@ -323,9 +315,8 @@ $lblCount.Padding = New-Object System.Windows.Forms.Padding(8, 9, 0, 0)
 $lblCount.Font = $fontState
 $lblCount.Text = 'Řádků: 0'
 $importPanel.Controls.AddRange(@($btnLoad, $btnClear, $lblCount))
-$importGrid.Controls.Add($lblInput, 0, 0)
-$importGrid.Controls.Add($txtInput, 0, 1)
-$importGrid.Controls.Add($importPanel, 0, 2)
+$importGrid.Controls.Add($txtInput, 0, 0)
+$importGrid.Controls.Add($importPanel, 0, 1)
 
 # Aktuální hodnota: horní lišta (popisek + šipky), velká hodnota, dole info o poznámce
 $currentCard = New-Card
@@ -385,8 +376,8 @@ $actionPanel.Dock = 'Fill'
 $actionPanel.ColumnCount = 2
 [void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
 [void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
-$btnYes = New-BigButton '✓   Ponechat' $cYes $cWhite $fontBtn
-$btnNo  = New-BigButton '✗   Vymazat' $cNo $cWhite $fontBtn
+$btnYes = New-BigButton 'Ponechat' $cYes $cWhite $fontBtn
+$btnNo  = New-BigButton 'Vymazat' $cNo $cWhite $fontBtn
 $actionPanel.Controls.Add($btnYes, 0, 0)
 $actionPanel.Controls.Add($btnNo, 1, 0)
 $left.Controls.Add($actionPanel, 0, 2)
@@ -399,9 +390,9 @@ $secondaryPanel.ColumnCount = 4
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 [void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
-$btnUnsure = New-GhostButton '?   Vrátit se později'
+$btnUnsure = New-GhostButton '?   Vrátit se později' $cWhite
 $btnUnsure.ForeColor = $cUnsure
-$btnInsert = New-GhostButton '+   Vložit mezi'
+$btnInsert = New-GhostButton '+   Vložit mezi' $cWhite
 $btnInsert.ForeColor = $cAccent
 $btnUnsure.Anchor = 'None'
 $btnInsert.Anchor = 'None'
@@ -424,7 +415,7 @@ $right.RowCount = 5
 $notesCard.Inner.Controls.Add($right)
 
 $lblTitle = New-Object System.Windows.Forms.Label
-$lblTitle.Text = 'Nadpis poznámek'
+$lblTitle.Text = 'Název souboru'
 $lblTitle.Dock = 'Fill'
 $lblTitle.Font = $fontHead
 $titleRow = New-Object System.Windows.Forms.TableLayoutPanel
@@ -432,13 +423,17 @@ $titleRow.Dock = 'Fill'
 $titleRow.ColumnCount = 2
 [void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
 [void]$titleRow.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
-$txtTitle = New-Object System.Windows.Forms.TextBox
-$txtTitle.Dock = 'Fill'
-$txtTitle.Font = New-Object System.Drawing.Font('Segoe UI', 11)
-$txtTitle.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
-$btnAddTitle = New-GhostButton '+ Přidat nadpis'
-$titleRow.Controls.Add($txtTitle, 0, 0)
-$titleRow.Controls.Add($btnAddTitle, 1, 0)
+$txtFileName = New-Object System.Windows.Forms.TextBox
+$txtFileName.Dock = 'Fill'
+$txtFileName.Font = New-Object System.Drawing.Font('Segoe UI', 11)
+$txtFileName.Margin = New-Object System.Windows.Forms.Padding(0, 6, 4, 0)
+$lblExt = New-Object System.Windows.Forms.Label
+$lblExt.Text = '.txt'
+$lblExt.AutoSize = $true
+$lblExt.Anchor = 'Left'
+$lblExt.ForeColor = $cMuted
+$titleRow.Controls.Add($txtFileName, 0, 0)
+$titleRow.Controls.Add($lblExt, 1, 0)
 $lblNotes = New-Object System.Windows.Forms.Label
 $lblNotes.Text = 'Poznámky'
 $lblNotes.Dock = 'Fill'
@@ -447,8 +442,8 @@ $lblNotes.TextAlign = 'BottomLeft'
 $lblNotes.AutoEllipsis = $true
 $txtNotes = New-Object System.Windows.Forms.TextBox
 $txtNotes.Multiline = $true
-$txtNotes.ScrollBars = 'Both'
-$txtNotes.WordWrap = $false
+$txtNotes.ScrollBars = 'Vertical'
+$txtNotes.WordWrap = $true
 $txtNotes.Dock = 'Fill'
 $txtNotes.Font = $fontMono
 $txtNotes.BorderStyle = 'None'
@@ -557,10 +552,12 @@ function Update-View {
     $count = $script:Items.Count
     $decided = @($script:Items | Where-Object { $_.Status -eq 'keep' -or $_.Status -eq 'del' }).Count
     $btnOn = ($count -gt 0 -and -not $script:Done)
-    $btnYes.Enabled = $btnOn; $btnNo.Enabled = $btnOn; $btnInsert.Enabled = $btnOn; $btnUnsure.Enabled = $btnOn
+    # tlačítka se nevypínají (vypnutá vypadají nečitelně), jen se zesvětlí; obsluha si sama hlídá stav
+    $btnYes.Cursor = if ($btnOn) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
+    $btnNo.Cursor = $btnYes.Cursor
     $btnUp.Enabled = ($count -gt 0); $btnDown.Enabled = ($count -gt 0)
-    $btnYes.BackColor = if ($btnOn) { $cYes } else { $cNeutral }
-    $btnNo.BackColor  = if ($btnOn) { $cNo }  else { $cNeutral }
+    $btnYes.BackColor = if ($btnOn) { $cYes } else { RGB 187 222 199 }
+    $btnNo.BackColor  = if ($btnOn) { $cNo }  else { RGB 240 190 202 }
     $lblCurrentNote.Text = ''
     if ($count -eq 0) {
         Set-State 'Bez seznamu' (RGB 226 232 240) $cMuted
@@ -647,27 +644,38 @@ function Set-Decision([string]$status) {
     Move-NextUndecided
 }
 
-# Přidá nadpis na konec poznámek (oddělený prázdným řádkem) a vyprázdní pole nadpisu
-function Add-Title {
-    $title = $txtTitle.Text.Trim()
-    if ($title -eq '') { return $false }
-    $t = $txtNotes.Text.TrimEnd()
-    $txtNotes.Text = if ($t -eq '') { $title + "`r`n" } else { $t + "`r`n`r`n" + $title + "`r`n" }
-    $txtNotes.SelectionStart = $txtNotes.Text.Length
-    $txtNotes.ScrollToCaret()
-    $txtTitle.Clear()
-    return $true
-}
-
 function Update-NotesCaption {
-    $lblNotes.Text = if ($script:NotesFile) { "Poznámky – $([System.IO.Path]::GetFileName($script:NotesFile))" } else { 'Poznámky (zatím neuloženo)' }
+    $lblNotes.Text = if ($script:NotesFile) { "Poznámky  •  $([System.IO.Path]::GetDirectoryName($script:NotesFile))" } else { 'Poznámky  •  zatím neuloženo' }
 }
 
-function Save-Notes([string]$path) {
+# Název z pole „Název souboru“ (bez .txt); prázdný = $null
+function Get-WantedFileName {
+    $name = $txtFileName.Text.Trim()
+    if ($name.ToLower().EndsWith('.txt')) { $name = $name.Substring(0, $name.Length - 4).Trim() }
+    if ($name -eq '') { return $null }
+    if ($name.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+        Show-Warn 'Název souboru obsahuje nepovolené znaky (např. \ / : * ? " < > |).'
+        return $false
+    }
+    return $name + '.txt'
+}
+
+# Uloží poznámky do $path. Pokud jde o přejmenování otevřeného souboru, starý soubor se po úspěšném uložení odstraní.
+function Save-Notes([string]$path, [bool]$rename = $false) {
     try {
+        $old = $script:NotesFile
+        $renaming = ($rename -and $old -and ($old -ne $path) -and ([System.IO.Path]::GetDirectoryName($old) -eq [System.IO.Path]::GetDirectoryName($path)))
+        if ($renaming -and [System.IO.File]::Exists($path) -and ($old.ToLower() -ne $path.ToLower())) {
+            $r = [System.Windows.Forms.MessageBox]::Show("Soubor $([System.IO.Path]::GetFileName($path)) už existuje. Přepsat ho?", 'Uložit', 'YesNo', 'Warning')
+            if ($r -ne 'Yes') { return }
+        }
         $enc = New-Object System.Text.UTF8Encoding($true)
         [System.IO.File]::WriteAllText($path, $txtNotes.Text, $enc)
+        if ($renaming -and ($old.ToLower() -ne $path.ToLower()) -and [System.IO.File]::Exists($old)) {
+            [System.IO.File]::Delete($old)
+        }
         $script:NotesFile = $path
+        $txtFileName.Text = [System.IO.Path]::GetFileNameWithoutExtension($path)
         Update-NotesCaption
         Show-Info "Poznámky byly uloženy do:`n$path"
     } catch {
@@ -680,7 +688,9 @@ function Save-NotesAs {
     $sfd.Filter = 'Textový soubor (*.txt)|*.txt'
     $sfd.DefaultExt = 'txt'
     $sfd.AddExtension = $true
-    $sfd.FileName = if ($script:NotesFile) { [System.IO.Path]::GetFileName($script:NotesFile) } else { 'poznamky.txt' }
+    $wanted = Get-WantedFileName
+    if ($wanted -eq $false) { return }
+    $sfd.FileName = if ($wanted) { $wanted } elseif ($script:NotesFile) { [System.IO.Path]::GetFileName($script:NotesFile) } else { 'poznamky.txt' }
     if ($script:NotesFile) { $sfd.InitialDirectory = [System.IO.Path]::GetDirectoryName($script:NotesFile) }
     if ($sfd.ShowDialog($form) -eq 'OK') { Save-Notes $sfd.FileName }
     $sfd.Dispose()
@@ -692,16 +702,9 @@ function Update-InputCount {
     $rows = @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Replace("`t", '')) })
     $text = "Řádků: $($rows.Count)"
     $lblCount.ForeColor = $cText
-    if ($rows.Count -gt 0) {
-        $cols = $rows[0].Split("`t").Count
-        if ($cols -ge 2 -and $script:PastedCols -gt 2) {
-            $text = $text + "   •   vloženo sloupců: $($script:PastedCols), ponechán 1. a $($script:PastedCols)."
-        } elseif ($cols -ge 2) {
-            $text = $text + "   •   sloupců: $cols (použije se 1. a $cols.)"
-        } else {
-            $text = $text + '   •   jen 1 sloupec!'
-            $lblCount.ForeColor = $cWarn
-        }
+    if ($rows.Count -gt 0 -and $rows[0].Split("`t").Count -lt 2) {
+        $text = $text + '   •   jen 1 sloupec!'
+        $lblCount.ForeColor = $cWarn
     }
     $lblCount.Text = $text
 }
@@ -734,13 +737,8 @@ $btnLoad.Add_Click({ Invoke-Safe {
     $script:Items = $parsed.Items
     $script:Index = 0
     $script:Done = $false
-    [void](Add-Title)   # vyplněný nadpis se přidá do poznámek
     Show-Current
 } 'Seznam se nepodařilo načíst. Zkuste znovu zkopírovat data z Excelu.' })
-
-$btnAddTitle.Add_Click({ Invoke-Safe {
-    if (-not (Add-Title)) { Show-Warn 'Nejdřív napište nadpis.' }
-} 'Nadpis se nepodařilo přidat.' })
 
 $btnOpen.Add_Click({ Invoke-Safe {
     if ($txtNotes.Text.Trim() -ne '') {
@@ -760,6 +758,7 @@ $btnOpen.Add_Click({ Invoke-Safe {
             $txtNotes.SelectionStart = $txtNotes.Text.Length
             $txtNotes.ScrollToCaret()
             $script:NotesFile = $ofd.FileName
+            $txtFileName.Text = [System.IO.Path]::GetFileNameWithoutExtension($ofd.FileName)
             Update-NotesCaption
         } catch {
             Show-Error 'Soubor se nepodařilo otevřít. Zkontrolujte, zda existuje a není otevřený jinou aplikací.'
@@ -769,7 +768,13 @@ $btnOpen.Add_Click({ Invoke-Safe {
 } 'Soubor se nepodařilo otevřít.' })
 
 $btnSave.Add_Click({ Invoke-Safe {
-    if ($script:NotesFile) { Save-Notes $script:NotesFile } else { Save-NotesAs }
+    # Uložit: do otevřeného souboru; když se změnil název, soubor se přejmenuje (ve stejné složce)
+    $wanted = Get-WantedFileName
+    if ($wanted -eq $false) { return }
+    if (-not $script:NotesFile) { Save-NotesAs; return }
+    $dir = [System.IO.Path]::GetDirectoryName($script:NotesFile)
+    $target = if ($wanted) { [System.IO.Path]::Combine($dir, $wanted) } else { $script:NotesFile }
+    Save-Notes $target $true
 } 'Ukládání se nezdařilo.' })
 
 $btnSaveAs.Add_Click({ Invoke-Safe { Save-NotesAs } 'Ukládání se nezdařilo.' })
