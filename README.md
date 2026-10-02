@@ -4,7 +4,8 @@ Lokální pomocník pro Windows (PowerShell + WinForms) pro ruční procházení
 
 ## Spuštění
 
-**Dvojklikem na `spustit.cmd`** (musí být ve stejné složce jako `klirenc.ps1`).
+**Dvojklikem na `spustit.vbs`** (musí být ve stejné složce jako `klirenc.ps1`). Otevře se jen okno aplikace, bez černého okna příkazového řádku.
+`spustit.cmd` dělá totéž, jen na okamžik problikne příkazový řádek.
 Dvojklik přímo na `klirenc.ps1` ho ve Windows jen otevře v Poznámkovém bloku.
 
 Nebo z příkazového řádku ve složce se skriptem:
