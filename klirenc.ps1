@@ -91,32 +91,65 @@ function ConvertFrom-Rows([string]$text) {
 # ---------- GUI ----------
 # Barevná paleta (světlý moderní vzhled)
 function RGB([int]$r, [int]$g, [int]$b) { [System.Drawing.Color]::FromArgb($r, $g, $b) }
-$cBg        = RGB 243 244 246   # pozadí okna
+$cBg        = RGB 241 245 249   # pozadí okna
 $cCard      = RGB 255 255 255   # karty
 $cBorder    = RGB 226 232 240
-$cText      = RGB 17 24 39
-$cMuted     = RGB 107 114 128
-$cAccent    = RGB 37 99 235     # modrá
-$cAccentBg  = RGB 219 234 254   # světle modrá - zvýraznění aktuálního řádku
-$cHeader    = RGB 30 41 59
+$cText      = RGB 15 23 42
+$cMuted     = RGB 100 116 139
+$cAccent    = RGB 79 70 229     # indigo
+$cAccentBg  = RGB 238 242 255   # zvýraznění aktuálního řádku
+$cHeader    = RGB 255 255 255
 $cYes       = RGB 22 163 74
-$cNo        = RGB 220 38 38
+$cNo        = RGB 225 29 72
+$cUnsure    = RGB 217 119 6
 $cWarn      = RGB 185 28 28
 $cDone      = RGB 21 128 61
-$cNeutral   = RGB 229 231 235
+$cNeutral   = RGB 241 245 249
+$cInput     = RGB 248 250 252
+$cWhite     = [System.Drawing.Color]::White
 
 $fontBase  = New-Object System.Drawing.Font('Segoe UI', 10)
 $fontSmall = New-Object System.Drawing.Font('Segoe UI', 9)
 $fontHead  = New-Object System.Drawing.Font('Segoe UI Semibold', 10.5)
-$fontBig   = New-Object System.Drawing.Font('Segoe UI Semibold', 26)
-$fontBtn   = New-Object System.Drawing.Font('Segoe UI', 20, [System.Drawing.FontStyle]::Bold)
-$fontState = New-Object System.Drawing.Font('Segoe UI Semibold', 11)
+$fontBig   = New-Object System.Drawing.Font('Segoe UI Semibold', 28)
+$fontBtn   = New-Object System.Drawing.Font('Segoe UI Semibold', 18)
+$fontState = New-Object System.Drawing.Font('Segoe UI Semibold', 10.5)
 $fontMono  = New-Object System.Drawing.Font('Consolas', 10.5)
 $fontMonoB = New-Object System.Drawing.Font('Consolas', 10.5, [System.Drawing.FontStyle]::Bold)
+
+# Tmavší odstín barvy (pro najetí myší)
+function Get-Shade($c, [double]$f) {
+    [System.Drawing.Color]::FromArgb([int]($c.R * $f), [int]($c.G * $f), [int]($c.B * $f))
+}
+
+# Zaoblené rohy ovládacího prvku (poloměr v Tag)
+$script:RoundHandler = {
+    param($s, $e)
+    try {
+        $r = [int]$s.Tag
+        $w = $s.Width; $h = $s.Height
+        if ($w -le 2 * $r -or $h -le 2 * $r) { return }
+        $d = 2 * $r
+        $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $path.AddArc(0, 0, $d, $d, 180, 90)
+        $path.AddArc($w - $d, 0, $d, $d, 270, 90)
+        $path.AddArc($w - $d, $h - $d, $d, $d, 0, 90)
+        $path.AddArc(0, $h - $d, $d, $d, 90, 90)
+        $path.CloseFigure()
+        $s.Region = New-Object System.Drawing.Region($path)
+    } catch { }
+}
+function Set-Rounded($ctrl, [int]$radius) {
+    $ctrl.Tag = $radius
+    $ctrl.Add_Resize($script:RoundHandler)
+    & $script:RoundHandler $ctrl $null
+}
 
 function Set-FlatButton($btn, $back, $fore) {
     $btn.FlatStyle = 'Flat'
     $btn.FlatAppearance.BorderSize = 0
+    $btn.FlatAppearance.MouseOverBackColor = Get-Shade $back 0.92
+    $btn.FlatAppearance.MouseDownBackColor = Get-Shade $back 0.85
     $btn.BackColor = $back
     $btn.ForeColor = $fore
     $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -127,14 +160,34 @@ function New-Button([string]$text, $back, $fore) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text
     $b.AutoSize = $true
-    $b.Height = 34
-    $b.Padding = New-Object System.Windows.Forms.Padding(10, 2, 10, 2)
+    $b.Height = 36
+    $b.Padding = New-Object System.Windows.Forms.Padding(12, 2, 12, 2)
     $b.Margin = New-Object System.Windows.Forms.Padding(0, 3, 8, 3)
     Set-FlatButton $b $back $fore
+    Set-Rounded $b 8
     $b
 }
 
-# Bílá "karta" s okrajem 1 px
+# Velké tlačítko vyplňující buňku
+function New-BigButton([string]$text, $back, $fore, $font) {
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $text
+    $b.Dock = 'Fill'
+    $b.Font = $font
+    $b.Margin = New-Object System.Windows.Forms.Padding(6, 4, 6, 4)
+    Set-FlatButton $b $back $fore
+    Set-Rounded $b 12
+    $b
+}
+
+# Světlé tlačítko s rámečkem
+function New-GhostButton([string]$text) {
+    $b = New-Button $text $cCard $cText
+    $b.FlatAppearance.BorderSize = 1
+    $b.FlatAppearance.BorderColor = $cBorder
+    $b
+}
+
 function New-Card {
     $outer = New-Object System.Windows.Forms.Panel
     $outer.Dock = 'Fill'
@@ -144,8 +197,10 @@ function New-Card {
     $inner = New-Object System.Windows.Forms.Panel
     $inner.Dock = 'Fill'
     $inner.BackColor = $cCard
-    $inner.Padding = New-Object System.Windows.Forms.Padding(12, 10, 12, 10)
+    $inner.Padding = New-Object System.Windows.Forms.Padding(16, 12, 16, 12)
     $outer.Controls.Add($inner)
+    Set-Rounded $outer 12
+    Set-Rounded $inner 11
     @{ Outer = $outer; Inner = $inner }
 }
 
@@ -171,7 +226,7 @@ $form.ForeColor = $cText
 # --- Hlavička: název, stav a pozice ---
 $header = New-Object System.Windows.Forms.TableLayoutPanel
 $header.Dock = 'Top'
-$header.Height = 52
+$header.Height = 60
 $header.BackColor = $cHeader
 $header.ColumnCount = 3
 $header.Padding = New-Object System.Windows.Forms.Padding(16, 0, 16, 0)
@@ -179,22 +234,23 @@ $header.Padding = New-Object System.Windows.Forms.Padding(16, 0, 16, 0)
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
 [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
 $lblApp = New-Object System.Windows.Forms.Label
-$lblApp.Text = 'klirenc'
+$lblApp.Text = '◆ klirenc'
 $lblApp.AutoSize = $true
 $lblApp.Anchor = 'Left'
-$lblApp.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 15)
-$lblApp.ForeColor = [System.Drawing.Color]::White
+$lblApp.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
+$lblApp.ForeColor = $cAccent
 $lblState = New-Object System.Windows.Forms.Label
 $lblState.AutoSize = $true
 $lblState.Anchor = 'Left'
 $lblState.Margin = New-Object System.Windows.Forms.Padding(18, 0, 0, 0)
-$lblState.Padding = New-Object System.Windows.Forms.Padding(10, 4, 10, 4)
+$lblState.Padding = New-Object System.Windows.Forms.Padding(12, 5, 12, 5)
 $lblState.Font = $fontState
+Set-Rounded $lblState 12
 $lblPos = New-Object System.Windows.Forms.Label
 $lblPos.AutoSize = $true
 $lblPos.Anchor = 'Right'
-$lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 15)
-$lblPos.ForeColor = [System.Drawing.Color]::White
+$lblPos.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
+$lblPos.ForeColor = $cText
 $header.Controls.Add($lblApp, 0, 0)
 $header.Controls.Add($lblState, 1, 0)
 $header.Controls.Add($lblPos, 2, 0)
@@ -206,6 +262,11 @@ $split.BackColor = $cBg
 $split.SplitterWidth = 6
 $split.Padding = New-Object System.Windows.Forms.Padding(8)
 $form.Controls.Add($split)
+$headerLine = New-Object System.Windows.Forms.Panel
+$headerLine.Dock = 'Top'
+$headerLine.Height = 1
+$headerLine.BackColor = $cBorder
+$form.Controls.Add($headerLine)
 $form.Controls.Add($header)
 
 # --- Levá část: import a práce ---
@@ -215,8 +276,8 @@ $left.ColumnCount = 1
 $left.RowCount = 4
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # import
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # aktuální hodnota
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 120)))  # Ponechat/Vymazat + Vložit mezi
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 40)))   # malé tlačítko ?
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 88)))   # Ponechat / Vymazat
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 48)))   # vedlejší akce
 $split.Panel1.Controls.Add($left)
 
 # Import: jedno pole, do kterého se vloží řádky z Excelu (použije se 1. a poslední sloupec)
@@ -247,15 +308,15 @@ $txtInput.AcceptsTab = $true
 $txtInput.Dock = 'Fill'
 $txtInput.Font = $fontMono
 $txtInput.BorderStyle = 'None'
-$txtInput.BackColor = RGB 249 250 251
+$txtInput.BackColor = $cInput
 
 $importPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $importPanel.Dock = 'Fill'
 $importPanel.WrapContents = $false
 $importPanel.Padding = New-Object System.Windows.Forms.Padding(0, 4, 0, 0)
-$btnLoad = New-Button 'Vytvořit seznam' $cAccent ([System.Drawing.Color]::White)
+$btnLoad = New-Button 'Vytvořit seznam' $cAccent $cWhite
 $btnLoad.Font = $fontState
-$btnClear = New-Button 'Zrušit seznam' $cNeutral $cText
+$btnClear = New-GhostButton 'Zrušit seznam'
 $lblCount = New-Object System.Windows.Forms.Label
 $lblCount.AutoSize = $true
 $lblCount.Padding = New-Object System.Windows.Forms.Padding(8, 9, 0, 0)
@@ -266,15 +327,45 @@ $importGrid.Controls.Add($lblInput, 0, 0)
 $importGrid.Controls.Add($txtInput, 0, 1)
 $importGrid.Controls.Add($importPanel, 0, 2)
 
-# Aktuální hodnota
+# Aktuální hodnota: horní lišta (popisek + šipky), velká hodnota, dole info o poznámce
 $currentCard = New-Card
 $left.Controls.Add($currentCard.Outer, 0, 1)
-$lblCurrentCap = New-Caption 'Aktuální údaj k ověření (zkopírováno do schránky)'
-$lblCurrentCap.ForeColor = $cMuted
+
+$currentTop = New-Object System.Windows.Forms.TableLayoutPanel
+$currentTop.Dock = 'Top'
+$currentTop.Height = 40
+$currentTop.ColumnCount = 3
+[void]$currentTop.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 100)))
+[void]$currentTop.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute', 46)))
+[void]$currentTop.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute', 46)))
+$lblCurrentCap = New-Object System.Windows.Forms.Label
+$lblCurrentCap.Text = 'AKTUÁLNÍ ÚDAJ  •  zkopírováno do schránky'
+$lblCurrentCap.Dock = 'Fill'
+$lblCurrentCap.TextAlign = 'MiddleLeft'
 $lblCurrentCap.Font = $fontSmall
+$lblCurrentCap.ForeColor = $cMuted
+function New-NavButton([string]$text) {
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $text
+    $b.Dock = 'Fill'
+    $b.Font = New-Object System.Drawing.Font('Segoe UI', 11)
+    $b.Margin = New-Object System.Windows.Forms.Padding(4, 2, 0, 2)
+    Set-FlatButton $b $cNeutral $cText
+    Set-Rounded $b 8
+    $b
+}
+$btnUp = New-NavButton '▲'
+$btnDown = New-NavButton '▼'
+$tips = New-Object System.Windows.Forms.ToolTip
+$tips.SetToolTip($btnUp, 'Předchozí řádek')
+$tips.SetToolTip($btnDown, 'Další řádek')
+$currentTop.Controls.Add($lblCurrentCap, 0, 0)
+$currentTop.Controls.Add($btnUp, 1, 0)
+$currentTop.Controls.Add($btnDown, 2, 0)
+
 $lblCurrentNote = New-Object System.Windows.Forms.Label
 $lblCurrentNote.Dock = 'Bottom'
-$lblCurrentNote.Height = 30
+$lblCurrentNote.Height = 34
 $lblCurrentNote.Font = $fontBase
 $lblCurrentNote.ForeColor = $cMuted
 $lblCurrentNote.TextAlign = 'MiddleCenter'
@@ -284,73 +375,39 @@ $lblCurrent.Dock = 'Fill'
 $lblCurrent.Font = $fontBig
 $lblCurrent.TextAlign = 'MiddleCenter'
 $lblCurrent.AutoEllipsis = $true
-$currentCard.Inner.BackColor = $cCard
 $currentCard.Inner.Controls.Add($lblCurrent)
 $currentCard.Inner.Controls.Add($lblCurrentNote)
-$currentCard.Inner.Controls.Add($lblCurrentCap)
+$currentCard.Inner.Controls.Add($currentTop)
 
+# Hlavní rozhodnutí: dvě velká tlačítka vedle sebe
 $actionPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $actionPanel.Dock = 'Fill'
-$actionPanel.ColumnCount = 4
-$actionPanel.Padding = New-Object System.Windows.Forms.Padding(3, 0, 3, 3)
-[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute', 70)))
-[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 40)))
-[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 40)))
-[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 20)))
-$btnYes = New-Object System.Windows.Forms.Button
-$btnYes.Text = 'Ponechat'
-$btnYes.Dock = 'Fill'
-$btnYes.Font = $fontBtn
-$btnYes.Margin = New-Object System.Windows.Forms.Padding(3)
-Set-FlatButton $btnYes $cYes ([System.Drawing.Color]::White)
-$btnNo = New-Object System.Windows.Forms.Button
-$btnNo.Text = 'Vymazat'
-$btnNo.Dock = 'Fill'
-$btnNo.Font = $fontBtn
-$btnNo.Margin = New-Object System.Windows.Forms.Padding(3)
-Set-FlatButton $btnNo $cNo ([System.Drawing.Color]::White)
-$btnInsert = New-Object System.Windows.Forms.Button
-$btnInsert.Text = 'Vložit mezi'
-$btnInsert.Dock = 'Fill'
-$btnInsert.Font = $fontState
-$btnInsert.Margin = New-Object System.Windows.Forms.Padding(3)
-Set-FlatButton $btnInsert $cCard $cAccent
-$btnInsert.FlatAppearance.BorderSize = 1
-$btnInsert.FlatAppearance.BorderColor = $cAccent
-# Ruční procházení seznamu
-$navPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$navPanel.Dock = 'Fill'
-$navPanel.RowCount = 2
-$navPanel.Margin = New-Object System.Windows.Forms.Padding(0)
-[void]$navPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))
-[void]$navPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))
-$btnUp = New-Object System.Windows.Forms.Button
-$btnUp.Text = '▲'
-$btnUp.Dock = 'Fill'
-$btnUp.Font = $fontState
-$btnUp.Margin = New-Object System.Windows.Forms.Padding(3)
-Set-FlatButton $btnUp $cNeutral $cText
-$btnDown = New-Object System.Windows.Forms.Button
-$btnDown.Text = '▼'
-$btnDown.Dock = 'Fill'
-$btnDown.Font = $fontState
-$btnDown.Margin = New-Object System.Windows.Forms.Padding(3)
-Set-FlatButton $btnDown $cNeutral $cText
-$navPanel.Controls.Add($btnUp, 0, 0)
-$navPanel.Controls.Add($btnDown, 0, 1)
-$actionPanel.Controls.Add($navPanel, 0, 0)
-$actionPanel.Controls.Add($btnYes, 1, 0)
-$actionPanel.Controls.Add($btnNo, 2, 0)
-$actionPanel.Controls.Add($btnInsert, 3, 0)
+$actionPanel.ColumnCount = 2
+[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
+[void]$actionPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
+$btnYes = New-BigButton '✓   Ponechat' $cYes $cWhite $fontBtn
+$btnNo  = New-BigButton '✗   Vymazat' $cNo $cWhite $fontBtn
+$actionPanel.Controls.Add($btnYes, 0, 0)
+$actionPanel.Controls.Add($btnNo, 1, 0)
 $left.Controls.Add($actionPanel, 0, 2)
 
-# Malé tlačítko „?“ – nejistý řádek, vrátit se k němu později
-$unsurePanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$unsurePanel.Dock = 'Fill'
-$unsurePanel.Padding = New-Object System.Windows.Forms.Padding(76, 0, 0, 0)
-$btnUnsure = New-Button '?  Nevím – vrátit se později' $cNeutral $cText
-$unsurePanel.Controls.Add($btnUnsure)
-$left.Controls.Add($unsurePanel, 0, 3)
+# Vedlejší akce: malá tlačítka uprostřed pod hlavními
+$secondaryPanel = New-Object System.Windows.Forms.TableLayoutPanel
+$secondaryPanel.Dock = 'Fill'
+$secondaryPanel.ColumnCount = 4
+[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
+[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
+[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('AutoSize')))
+[void]$secondaryPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
+$btnUnsure = New-GhostButton '?   Vrátit se později'
+$btnUnsure.ForeColor = $cUnsure
+$btnInsert = New-GhostButton '+   Vložit mezi'
+$btnInsert.ForeColor = $cAccent
+$btnUnsure.Anchor = 'None'
+$btnInsert.Anchor = 'None'
+$secondaryPanel.Controls.Add($btnUnsure, 1, 0)
+$secondaryPanel.Controls.Add($btnInsert, 2, 0)
+$left.Controls.Add($secondaryPanel, 0, 3)
 
 # --- Pravá část: poznámky ---
 $notesCard = New-Card
@@ -379,7 +436,7 @@ $txtTitle = New-Object System.Windows.Forms.TextBox
 $txtTitle.Dock = 'Fill'
 $txtTitle.Font = New-Object System.Drawing.Font('Segoe UI', 11)
 $txtTitle.Margin = New-Object System.Windows.Forms.Padding(0, 4, 8, 0)
-$btnAddTitle = New-Button '+ Přidat nadpis' $cNeutral $cText
+$btnAddTitle = New-GhostButton '+ Přidat nadpis'
 $titleRow.Controls.Add($txtTitle, 0, 0)
 $titleRow.Controls.Add($btnAddTitle, 1, 0)
 $lblNotes = New-Object System.Windows.Forms.Label
@@ -395,14 +452,14 @@ $txtNotes.WordWrap = $false
 $txtNotes.Dock = 'Fill'
 $txtNotes.Font = $fontMono
 $txtNotes.BorderStyle = 'None'
-$txtNotes.BackColor = RGB 249 250 251
+$txtNotes.BackColor = $cInput
 $saveRow = New-Object System.Windows.Forms.FlowLayoutPanel
 $saveRow.Dock = 'Fill'
 $saveRow.WrapContents = $false
 $saveRow.Padding = New-Object System.Windows.Forms.Padding(0, 6, 0, 0)
-$btnOpen = New-Button 'Otevřít soubor…' $cNeutral $cText
-$btnSave = New-Button 'Uložit' $cAccent ([System.Drawing.Color]::White)
-$btnSaveAs = New-Button 'Uložit jako…' $cNeutral $cText
+$btnOpen = New-GhostButton 'Otevřít soubor…'
+$btnSave = New-Button 'Uložit' $cAccent $cWhite
+$btnSaveAs = New-GhostButton 'Uložit jako…'
 $saveRow.Controls.AddRange(@($btnOpen, $btnSave, $btnSaveAs))
 $right.Controls.Add($lblTitle, 0, 0)
 $right.Controls.Add($titleRow, 0, 1)
@@ -481,7 +538,7 @@ function Update-ListBox {
             $box.Select($box.GetFirstCharIndexFromLine($i), $lines[$i].Length)
             if ($st -eq 'keep') { $box.SelectionColor = $cYes }
             elseif ($st -eq 'del') { $box.SelectionColor = $cNo }
-            elseif ($st -eq 'unsure') { $box.SelectionColor = RGB 202 138 4 }
+            elseif ($st -eq 'unsure') { $box.SelectionColor = $cUnsure }
             if ($i -eq $script:Index -and -not $script:Done) {
                 $box.SelectionBackColor = $cAccentBg
                 $box.SelectionFont = $fontMonoB
@@ -506,19 +563,19 @@ function Update-View {
     $btnNo.BackColor  = if ($btnOn) { $cNo }  else { $cNeutral }
     $lblCurrentNote.Text = ''
     if ($count -eq 0) {
-        Set-State 'Bez seznamu' (RGB 71 85 105) ([System.Drawing.Color]::White)
+        Set-State 'Bez seznamu' (RGB 226 232 240) $cMuted
         $lblPos.Text = '0 / 0'
         $lblCurrent.Text = 'Vložte řádky z Excelu a klikněte na Vytvořit seznam'
         $lblCurrent.ForeColor = $cMuted
     } elseif ($script:Done) {
-        Set-State "Dokončeno  ($decided / $count)" $cDone ([System.Drawing.Color]::White)
+        Set-State "✓ Dokončeno  ($decided / $count)" (RGB 220 252 231) $cDone
         $lblPos.Text = "$count / $count"
         $lblCurrent.Text = '✓ Hotovo – všechny řádky jsou rozhodnuté'
         $lblCurrent.ForeColor = $cDone
         $lblCurrentNote.Text = 'Šipkami ▲ ▼ nebo kliknutím do seznamu se můžete k libovolnému řádku vrátit.'
     } else {
-        if ($decided -eq 0) { Set-State "Načteno  (hotovo 0 / $count)" $cAccent ([System.Drawing.Color]::White) }
-        else { Set-State "Probíhá  (hotovo $decided / $count)" (RGB 202 138 4) ([System.Drawing.Color]::White) }
+        if ($decided -eq 0) { Set-State "Načteno  •  hotovo 0 / $count" $cAccentBg $cAccent }
+        else { Set-State "Probíhá  •  hotovo $decided / $count" (RGB 254 243 199) (RGB 180 83 9) }
         $lblPos.Text = "$($script:Index + 1) / $count"
         $item = $script:Items[$script:Index]
         $lblCurrent.Text = $item.Value

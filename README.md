@@ -27,7 +27,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 4. Po vytvoření se v horním poli zobrazí seznam. U každého řádku je vidět stav: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později, bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný. Jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
    - **Ponechat** označí řádek ✓.
    - **Vymazat** zapíše poznámku (poslední sloupec) a označí řádek ✗. Prázdnou poznámku nezapíše, jen upozorní.
-   - Malé tlačítko **? Nevím – vrátit se později** označí řádek ?. Pokud měl řádek dřív ✗, jeho poznámka se odebere.
+   - Malé tlačítko **? Vrátit se později** označí řádek ?. Pokud měl řádek dřív ✗, jeho poznámka se odebere.
    - Po rozhodnutí se automaticky přejde na **další nerozhodnutý** řádek. Řádky s ? přijdou na řadu, až nezbude žádný nerozhodnutý.
    - Šipkami **▲ ▼**, kliknutím na řádek v horním seznamu nebo klávesami ↑ ↓ v tomto seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku z poznámek odebere.
    - Dokud je seznam vytvořený, horní pole nejde upravovat. Nová data vložíte až po **Zrušit seznam**.
