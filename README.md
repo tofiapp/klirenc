@@ -18,8 +18,11 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 ## Použití
 
 1. Vyplňte **Nadpis poznámek** (volitelné).
-2. V Excelu označte dva sloupce (*Údaj k ověření*, *Poznámka při NE*) a stiskněte Ctrl+C.
-3. Klikněte na **Načíst ze schránky**. Prázdné řádky se přeskočí. Když některý řádek nemá přesně dva sloupce, nenačte se nic a dosavadní seznam zůstane beze změny.
+2. V Excelu označte sloupec *Údaj k ověření*, stiskněte Ctrl+C a v levém poli klikněte na **Načíst ze schránky**. Totéž udělejte se sloupcem *Poznámka při NE* v pravém poli. Data můžete do polí vložit i ručně (Ctrl+V). Pod každým polem je vidět počet řádků. Když se počty liší, zčervenají.
+3. Klikněte na **Vytvořit seznam**. Řádky se spárují podle pořadí a řádky prázdné v obou sloupcích se přeskočí. Seznam se nevytvoří a dosavadní seznam zůstane beze změny, když:
+   - se počty řádků liší,
+   - některý řádek má poznámku, ale prázdný údaj,
+   - pole obsahuje víc sloupců.
 4. Aktuální hodnota se zobrazí velkým písmem a automaticky se zkopíruje do schránky.
    - **ANO** přejde na další řádek.
    - **NE** zapíše do poznámek druhý sloupec a přejde dál. Prázdnou poznámku nezapíše, jen upozorní.

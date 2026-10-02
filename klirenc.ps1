@@ -23,29 +23,42 @@ function Invoke-Safe([scriptblock]$action, [string]$message) {
 }
 
 # ---------- Parsování vstupu ----------
+# Rozdělí vložený sloupec na řádky; koncové prázdné řádky (Excel přidává konec řádku) se odříznou.
+function Get-ColumnLines([string]$text) {
+    if ([string]::IsNullOrEmpty($text)) { return ,@() }
+    $lines = [System.Collections.Generic.List[string]]($text -split "\r\n|\n|\r")
+    while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[$lines.Count - 1])) { $lines.RemoveAt($lines.Count - 1) }
+    return ,$lines.ToArray()
+}
+
+# Spáruje dva samostatně vložené sloupce po řádcích.
 # Vrací @{ Ok; Items; Error }. Při chybě nevrací žádné položky.
-function ConvertFrom-PastedText([string]$text) {
+function ConvertFrom-Columns([string]$text1, [string]$text2) {
+    $a = Get-ColumnLines $text1
+    $b = Get-ColumnLines $text2
+    if ($a.Count -eq 0) {
+        return @{ Ok = $false; Error = 'Sloupec Údaj k ověření je prázdný. Vložte ho ze schránky.' }
+    }
+    if ($b.Count -gt $a.Count) {
+        return @{ Ok = $false; Error = "Počty řádků nesouhlasí: Údaj k ověření má $($a.Count), Poznámka při NE má $($b.Count).`n`nZkopírujte oba sloupce ze stejného rozsahu řádků.`nNic nebylo načteno." }
+    }
+    if ($b.Count -lt $a.Count -and $b.Count -gt 0) {
+        # kratší druhý sloupec je v pořádku jen tehdy, když chybějící konec tvoří prázdné buňky - to ale nepoznáme, proto upozorníme
+        return @{ Ok = $false; Error = "Počty řádků nesouhlasí: Údaj k ověření má $($a.Count), Poznámka při NE má $($b.Count).`n`nPokud jsou poslední poznámky prázdné, označte v Excelu i je (stejný rozsah řádků jako u prvního sloupce).`nNic nebylo načteno." }
+    }
     $result = New-Object System.Collections.Generic.List[object]
-    if ([string]::IsNullOrEmpty($text)) {
-        return @{ Ok = $false; Error = 'Vstup je prázdný. Zkopírujte v Excelu dva sloupce a zkuste to znovu.' }
-    }
-    $lines = $text -split "\r\n|\n|\r"
-    $lineNo = 0
-    foreach ($line in $lines) {
-        $lineNo++
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        $parts = $line.Split("`t")
-        if ($parts.Count -ne 2) {
-            return @{ Ok = $false; Error = "Řádek $lineNo nemá přesně dva sloupce oddělené tabulátorem (má $($parts.Count)).`n`nZkopírujte z Excelu právě dva sloupce: Údaj k ověření a Poznámka při NE.`nNic nebylo načteno." }
+    for ($i = 0; $i -lt $a.Count; $i++) {
+        $rowNo = $i + 1
+        $v = $a[$i]
+        $n = if ($i -lt $b.Count) { $b[$i] } else { '' }
+        if ($v.Contains("`t") -or $n.Contains("`t")) {
+            return @{ Ok = $false; Error = "Řádek $rowNo obsahuje více sloupců. Do každého pole vložte vždy jen jeden sloupec z Excelu.`nNic nebylo načteno." }
         }
-        $value = $parts[0].Trim()
-        if ($value -eq '') {
-            return @{ Ok = $false; Error = "Řádek $lineNo má prázdný první sloupec (Údaj k ověření).`nNic nebylo načteno." }
+        if ([string]::IsNullOrWhiteSpace($v) -and [string]::IsNullOrWhiteSpace($n)) { continue }
+        if ([string]::IsNullOrWhiteSpace($v)) {
+            return @{ Ok = $false; Error = "Řádek $rowNo má poznámku, ale prázdný Údaj k ověření.`nNic nebylo načteno." }
         }
-        $result.Add((New-Item2 $value $parts[1].Trim()))
-    }
-    if ($result.Count -eq 0) {
-        return @{ Ok = $false; Error = 'Vstup neobsahuje žádný neprázdný řádek.' }
+        $result.Add((New-Item2 $v.Trim() $n.Trim()))
     }
     return @{ Ok = $true; Items = $result }
 }
@@ -75,34 +88,65 @@ $left.Dock = 'Fill'
 $left.ColumnCount = 1
 $left.RowCount = 6
 $left.Padding = New-Object System.Windows.Forms.Padding(8)
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 26)))   # popisek importu
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 45)))    # vstup
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 5)))     # import (sloupce)
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 40)))    # import (sloupce)
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 44)))   # tlačítka importu
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 34)))   # stav + pozice
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 55)))    # aktuální hodnota
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 130)))  # Ano/Ne + Vložit mezi
 $split.Panel1.Controls.Add($left)
 
-$lblInput = New-Object System.Windows.Forms.Label
-$lblInput.Text = 'Import (dva sloupce z Excelu: Údaj k ověření <TAB> Poznámka při NE):'
-$lblInput.Dock = 'Fill'
-$left.Controls.Add($lblInput, 0, 0)
+# Import: dva samostatně vkládané sloupce vedle sebe, každý s počtem řádků
+$importGrid = New-Object System.Windows.Forms.TableLayoutPanel
+$importGrid.Dock = 'Fill'
+$importGrid.ColumnCount = 2
+$importGrid.RowCount = 3
+[void]$importGrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
+[void]$importGrid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent', 50)))
+[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 24)))
+[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 100)))
+[void]$importGrid.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 40)))
+$left.Controls.Add($importGrid, 0, 0)
+$left.SetRowSpan($importGrid, 2)
 
-$txtInput = New-Object System.Windows.Forms.TextBox
-$txtInput.Multiline = $true
-$txtInput.ScrollBars = 'Both'
-$txtInput.WordWrap = $false
-$txtInput.AcceptsTab = $true
-$txtInput.Dock = 'Fill'
-$txtInput.Font = New-Object System.Drawing.Font('Consolas', 10)
-$left.Controls.Add($txtInput, 0, 1)
+function New-ColumnInput([string]$caption, [int]$col) {
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = $caption
+    $lbl.Dock = 'Fill'
+    $lbl.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.Multiline = $true
+    $txt.ScrollBars = 'Both'
+    $txt.WordWrap = $false
+    $txt.Dock = 'Fill'
+    $txt.Font = New-Object System.Drawing.Font('Consolas', 10)
+    $bar = New-Object System.Windows.Forms.FlowLayoutPanel
+    $bar.Dock = 'Fill'
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = 'Načíst ze schránky'
+    $btn.AutoSize = $true
+    $btn.Height = 32
+    $cnt = New-Object System.Windows.Forms.Label
+    $cnt.AutoSize = $true
+    $cnt.Padding = New-Object System.Windows.Forms.Padding(6, 8, 0, 0)
+    $cnt.Font = $fontState
+    $cnt.Text = 'Řádků: 0'
+    $bar.Controls.AddRange(@($btn, $cnt))
+    $importGrid.Controls.Add($lbl, $col, 0)
+    $importGrid.Controls.Add($txt, $col, 1)
+    $importGrid.Controls.Add($bar, $col, 2)
+    @{ Text = $txt; Button = $btn; CountLabel = $cnt }
+}
+$col1 = New-ColumnInput 'Údaj k ověření' 0
+$col2 = New-ColumnInput 'Poznámka při NE' 1
 
 $importPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $importPanel.Dock = 'Fill'
 $btnLoad = New-Object System.Windows.Forms.Button
-$btnLoad.Text = 'Načíst ze schránky'
+$btnLoad.Text = 'Vytvořit seznam'
 $btnLoad.AutoSize = $true
 $btnLoad.Height = 34
+$btnLoad.Font = $fontState
 $btnClear = New-Object System.Windows.Forms.Button
 $btnClear.Text = 'Vymazat seznam'
 $btnClear.AutoSize = $true
@@ -254,17 +298,37 @@ function Move-Next {
     Show-Current
 }
 
-$btnLoad.Add_Click({ Invoke-Safe {
-    $text = ''
-    if ([System.Windows.Forms.Clipboard]::ContainsText()) { $text = [System.Windows.Forms.Clipboard]::GetText() }
-    if ([string]::IsNullOrWhiteSpace($text)) {
-        Show-Warn 'Schránka neobsahuje text. V Excelu označte dva sloupce, stiskněte Ctrl+C a zkuste to znovu.'
-        return
-    }
-    $parsed = ConvertFrom-PastedText $text
-    if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
+# Počet řádků u každého vloženého sloupce (koncové prázdné řádky se nepočítají)
+function Update-ColumnCount($c) {
+    $lines = Get-ColumnLines $c.Text.Text
+    $filled = @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+    $c.CountLabel.Text = if ($filled -eq $lines.Count) { "Řádků: $($lines.Count)" } else { "Řádků: $($lines.Count) (vyplněných $filled)" }
+    $a = (Get-ColumnLines $col1.Text.Text).Count
+    $b = (Get-ColumnLines $col2.Text.Text).Count
+    $color = if ($a -gt 0 -and $b -gt 0 -and $a -ne $b) { [System.Drawing.Color]::Firebrick } else { [System.Drawing.Color]::Black }
+    $col1.CountLabel.ForeColor = $color; $col2.CountLabel.ForeColor = $color
+}
 
-    $txtInput.Text = $text
+foreach ($c in @($col1, $col2)) {
+    $c.Text.Tag = $c
+    $c.Button.Tag = $c
+    $c.Text.Add_TextChanged({ param($s, $e) Invoke-Safe { Update-ColumnCount $s.Tag } 'Počet řádků se nepodařilo spočítat.' })
+    $c.Button.Add_Click({ param($s, $e) Invoke-Safe {
+        $text = ''
+        if ([System.Windows.Forms.Clipboard]::ContainsText()) { $text = [System.Windows.Forms.Clipboard]::GetText() }
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            Show-Warn 'Schránka neobsahuje text. V Excelu označte sloupec, stiskněte Ctrl+C a zkuste to znovu.'
+            return
+        }
+        $s.Tag.Text.Text = $text
+    } 'Vložení ze schránky se nezdařilo.' })
+}
+
+$btnLoad.Add_Click({ Invoke-Safe {
+    $parsed = ConvertFrom-Columns $col1.Text.Text $col2.Text.Text
+    if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
+    if ($parsed.Items.Count -eq 0) { Show-Error 'Vstup neobsahuje žádný neprázdný řádek.'; return }
+
     $script:Items = $parsed.Items
     $script:Index = 0
 
@@ -342,7 +406,8 @@ $btnClear.Add_Click({ Invoke-Safe {
     if ($r -ne 'Yes') { return }
     $script:Items = New-Object System.Collections.Generic.List[object]
     $script:Index = 0
-    $txtInput.Clear()
+    $col1.Text.Clear()
+    $col2.Text.Clear()
     Update-View
 } 'Seznam se nepodařilo vymazat.' })
 
