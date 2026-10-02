@@ -212,10 +212,11 @@ $form.Controls.Add($header)
 $left = New-Object System.Windows.Forms.TableLayoutPanel
 $left.Dock = 'Fill'
 $left.ColumnCount = 1
-$left.RowCount = 3
+$left.RowCount = 4
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # import
 [void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent', 50)))    # aktuální hodnota
-[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 120)))  # Ano/Ne + Vložit mezi
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 120)))  # Ponechat/Vymazat + Vložit mezi
+[void]$left.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute', 40)))   # malé tlačítko ?
 $split.Panel1.Controls.Add($left)
 
 # Import: jedno pole, do kterého se vloží řádky z Excelu (použije se 1. a poslední sloupec)
@@ -343,6 +344,14 @@ $actionPanel.Controls.Add($btnNo, 2, 0)
 $actionPanel.Controls.Add($btnInsert, 3, 0)
 $left.Controls.Add($actionPanel, 0, 2)
 
+# Malé tlačítko „?“ – nejistý řádek, vrátit se k němu později
+$unsurePanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$unsurePanel.Dock = 'Fill'
+$unsurePanel.Padding = New-Object System.Windows.Forms.Padding(76, 0, 0, 0)
+$btnUnsure = New-Button '?  Nevím – vrátit se později' $cNeutral $cText
+$unsurePanel.Controls.Add($btnUnsure)
+$left.Controls.Add($unsurePanel, 0, 3)
+
 # --- Pravá část: poznámky ---
 $notesCard = New-Card
 $split.Panel2.Controls.Add($notesCard.Outer)
@@ -430,12 +439,12 @@ function Remove-NoteLine([string]$line) {
 }
 
 # Po vytvoření seznamu zobrazí horní pole seznam se stavem každého řádku:
-#   ✓ = Ponechat, ✗ = Vymazat (zapsáno do poznámek), prázdné = ještě nerozhodnuto
+#   ✓ = Ponechat, ✗ = Vymazat (zapsáno do poznámek), ? = vrátit se později, prázdné = ještě nerozhodnuto
 function Get-ListText {
     $sb = New-Object System.Text.StringBuilder
     for ($i = 0; $i -lt $script:Items.Count; $i++) {
         $it = $script:Items[$i]
-        $mark = switch ($it.Status) { 'keep' { '✓' } 'del' { '✗' } default { ' ' } }
+        $mark = switch ($it.Status) { 'keep' { '✓' } 'del' { '✗' } 'unsure' { '?' } default { ' ' } }
         $line = "$mark  $($it.Value)`t$($it.Note)"
         if ($it.Manual) { $line += '   (vloženo ručně)' }
         if ($i -gt 0) { [void]$sb.Append("`n") }
@@ -472,6 +481,7 @@ function Update-ListBox {
             $box.Select($box.GetFirstCharIndexFromLine($i), $lines[$i].Length)
             if ($st -eq 'keep') { $box.SelectionColor = $cYes }
             elseif ($st -eq 'del') { $box.SelectionColor = $cNo }
+            elseif ($st -eq 'unsure') { $box.SelectionColor = RGB 202 138 4 }
             if ($i -eq $script:Index -and -not $script:Done) {
                 $box.SelectionBackColor = $cAccentBg
                 $box.SelectionFont = $fontMonoB
@@ -488,9 +498,9 @@ function Update-ListBox {
 
 function Update-View {
     $count = $script:Items.Count
-    $decided = @($script:Items | Where-Object { $_.Status -ne '' }).Count
+    $decided = @($script:Items | Where-Object { $_.Status -eq 'keep' -or $_.Status -eq 'del' }).Count
     $btnOn = ($count -gt 0 -and -not $script:Done)
-    $btnYes.Enabled = $btnOn; $btnNo.Enabled = $btnOn; $btnInsert.Enabled = $btnOn
+    $btnYes.Enabled = $btnOn; $btnNo.Enabled = $btnOn; $btnInsert.Enabled = $btnOn; $btnUnsure.Enabled = $btnOn
     $btnUp.Enabled = ($count -gt 0); $btnDown.Enabled = ($count -gt 0)
     $btnYes.BackColor = if ($btnOn) { $cYes } else { $cNeutral }
     $btnNo.BackColor  = if ($btnOn) { $cNo }  else { $cNeutral }
@@ -517,6 +527,7 @@ function Update-View {
         switch ($item.Status) {
             'keep' { $info = '✓ Ponecháno   •   ' + $info }
             'del'  { $info = '✗ Vymazáno (zapsáno v poznámkách)   •   ' + $info }
+            'unsure' { $info = '? Vrátit se později   •   ' + $info }
         }
         if ($item.Manual) { $info += '   •   vloženo ručně' }
         $lblCurrentNote.Text = $info
@@ -534,16 +545,19 @@ function Show-Current {
     }
 }
 
-# Přejde na další nerozhodnutý řádek (hledá od aktuálního dál, pak od začátku); když žádný není, dokončeno
+# Přejde na další nerozhodnutý řádek (hledá od aktuálního dál, pak od začátku).
+# Až nezbývá žádný nerozhodnutý, přijdou na řadu řádky označené „?“; když nejsou ani ty, dokončeno.
 function Move-NextUndecided {
     $count = $script:Items.Count
-    for ($k = 1; $k -le $count; $k++) {
-        $i = ($script:Index + $k) % $count
-        if ($script:Items[$i].Status -eq '') {
-            $script:Index = $i
-            $script:Done = $false
-            Show-Current
-            return
+    foreach ($wanted in @('', 'unsure')) {
+        for ($k = 1; $k -le $count; $k++) {
+            $i = ($script:Index + $k) % $count
+            if ($script:Items[$i].Status -eq $wanted) {
+                $script:Index = $i
+                $script:Done = $false
+                Show-Current
+                return
+            }
         }
     }
     $script:Done = $true
@@ -567,7 +581,7 @@ function Set-Decision([string]$status) {
         if ($note -eq '') { Show-Warn 'Poznámka pro tento řádek je prázdná. Nic se nezapíše, pokračuje se dalším řádkem.' }
         else { Add-NoteLine $note }
     }
-    if ($status -eq 'keep' -and $item.Status -eq 'del' -and $note -ne '') {
+    if ($status -ne 'del' -and $item.Status -eq 'del' -and $note -ne '') {
         if (-not (Remove-NoteLine $note)) {
             Show-Warn "Řádek byl dříve vymazán, ale jeho poznámku „$note“ se v poznámkách nepodařilo najít. Zkontrolujte poznámky ručně."
         }
@@ -719,7 +733,19 @@ $txtInput.Add_MouseUp({ Invoke-Safe {
     }
 } 'Přechod na řádek se nezdařil.' })
 
+# Šipky na klávesnici v horním seznamu přepínají řádky
+$txtInput.Add_KeyDown({ param($s, $e)
+    if ($script:Items.Count -eq 0) { return }
+    $delta = switch ($e.KeyCode) { 'Up' { -1 } 'Down' { 1 } 'PageUp' { -10 } 'PageDown' { 10 } default { 0 } }
+    if ($delta -ne 0) {
+        $e.Handled = $true
+        $e.SuppressKeyPress = $true
+        Invoke-Safe { Move-By $delta } 'Přechod na řádek se nezdařil.'
+    }
+})
+
 $btnNo.Add_Click({ Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' })
+$btnUnsure.Add_Click({ Invoke-Safe { Set-Decision 'unsure' } 'Označení se nezdařilo.' })
 
 $btnInsert.Add_Click({ Invoke-Safe {
     if ($script:Index -ge $script:Items.Count) { return }

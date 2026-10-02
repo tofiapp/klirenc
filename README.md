@@ -24,11 +24,12 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - některý řádek má jen jeden sloupec,
    - řádky mají různý počet sloupců,
    - první sloupec je prázdný.
-4. Po vytvoření se v horním poli zobrazí seznam. U každého řádku je vidět stav: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný. Jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
+4. Po vytvoření se v horním poli zobrazí seznam. U každého řádku je vidět stav: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později, bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný. Jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
    - **Ponechat** označí řádek ✓.
    - **Vymazat** zapíše poznámku (poslední sloupec) a označí řádek ✗. Prázdnou poznámku nezapíše, jen upozorní.
-   - Po rozhodnutí se automaticky přejde na **další nerozhodnutý** řádek.
-   - Šipkami **▲ ▼** nebo kliknutím na řádek v horním seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku z poznámek odebere.
+   - Malé tlačítko **? Nevím – vrátit se později** označí řádek ?. Pokud měl řádek dřív ✗, jeho poznámka se odebere.
+   - Po rozhodnutí se automaticky přejde na **další nerozhodnutý** řádek. Řádky s ? přijdou na řadu, až nezbude žádný nerozhodnutý.
+   - Šipkami **▲ ▼**, kliknutím na řádek v horním seznamu nebo klávesami ↑ ↓ v tomto seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku z poznámek odebere.
    - Dokud je seznam vytvořený, horní pole nejde upravovat. Nová data vložíte až po **Zrušit seznam**.
 5. Další nadpis do stejných poznámek přidáte kdykoli tlačítkem **+ Přidat nadpis**.
 6. **Vložit mezi** přidá nový záznam hned za aktuální řádek. Aktuální řádek se nezmění.
