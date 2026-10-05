@@ -2,19 +2,124 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '21'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '22'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Drawing          # jen pro kreslení ikony KC
 
-# Vlastní identita procesu pro hlavní panel Windows: okno se neseskupí s ostatními okny PowerShellu
-# a na liště se zobrazí ikona KC. Musí proběhnout před vytvořením okna.
-try {
-    if (-not ('KcTaskbar' -as [type])) {
-        Add-Type -TypeDefinition @'
+# Pomocný kód pro Windows (identita na liště, sledování Ctrl + kliknutí). Kompilace trvá několik sekund,
+# proto se zkompilovaná knihovna uloží do %LOCALAPPDATA%\KontrolaClearance a při dalších spuštěních se jen načte.
+$script:NativeSource = @'
+using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+
+public static class KlirencCtrlClick {
+    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData; public uint flags; public uint time; public IntPtr extra; }
+
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
+    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string name);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_LBUTTONUP = 0x0202;
+    private const uint LLMHF_INJECTED = 0x01;
+    private const byte VK_CONTROL = 0x11;
+    private const uint KEYUP = 0x0002;
+
+    private static HookProc proc = Callback;   // drží delegáta, aby ho neuklidil GC
+    private static IntPtr hook = IntPtr.Zero;
+    private static bool swallowedDown = false;
+    private static readonly uint ownPid = (uint)Process.GetCurrentProcess().Id;
+
+    public static volatile bool Pending = false;
+    public static volatile bool Enabled = true;
+
+    public static bool Start() {
+        if (hook != IntPtr.Zero) return true;
+        using (Process p = Process.GetCurrentProcess())
+        using (ProcessModule m = p.MainModule) {
+            hook = SetWindowsHookEx(WH_MOUSE_LL, proc, GetModuleHandle(m.ModuleName), 0);
+        }
+        return hook != IntPtr.Zero;
+    }
+
+    public static void Stop() {
+        if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+    }
+
+    // Leží bod v okně jiné aplikace než tato aplikace?
+    private static bool PointIsOther(POINT pt) {
+        IntPtr w = GetAncestor(WindowFromPoint(pt), 2);
+        if (w == IntPtr.Zero) return false;
+        uint pid;
+        GetWindowThreadProcessId(w, out pid);
+        return pid != 0 && pid != ownPid;
+    }
+
+    // Ctrl + levé kliknutí v jiné aplikaci: původní kliknutí se zahodí (aby se neprovedla akce Ctrl+klik)
+    // a po puštění tlačítka se vloží aktuální údaj
+    private static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam) {
+        try {
+            if (nCode >= 0 && Enabled) {
+                int msg = wParam.ToInt32();
+                if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP) {
+                    MSLLHOOKSTRUCT info = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                    if ((info.flags & LLMHF_INJECTED) == 0) {
+                        if (msg == WM_LBUTTONDOWN && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && PointIsOther(info.pt)) {
+                            swallowedDown = true;
+                            return (IntPtr)1;
+                        }
+                        if (msg == WM_LBUTTONUP && swallowedDown) {
+                            swallowedDown = false;
+                            Pending = true;
+                            return (IntPtr)1;
+                        }
+                    }
+                }
+            }
+        } catch { }
+        return CallNextHookEx(hook, nCode, wParam, lParam);
+    }
+
+    private static void CtrlKey(byte vk) {
+        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+        keybd_event(vk, 0, 0, UIntPtr.Zero);
+        keybd_event(vk, 0, KEYUP, UIntPtr.Zero);
+        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
+    }
+
+    // Pustit Ctrl (uživatel ho ještě drží), obyčejně kliknout na místo kurzoru (aktivuje pole),
+    // označit obsah pole (Ctrl+A) a vložit (Ctrl+V) - obsah pole se nahradí
+    public static void ClickSelectAllPaste() {
+        const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
+        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(20);
+        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(80);
+        CtrlKey(0x41);   // A
+        System.Threading.Thread.Sleep(30);
+        CtrlKey(0x56);   // V
+    }
+}
+
 public static class KcTaskbar {
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
@@ -22,7 +127,27 @@ public static class KcTaskbar {
     public static extern bool SetProcessDPIAware();
 }
 '@
+function Import-NativeCode {
+    if ('KlirencCtrlClick' -as [type]) { return }
+    try {
+        $sha = [System.Security.Cryptography.SHA1]::Create()
+        $hash = -join ($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($script:NativeSource))[0..7] | ForEach-Object { $_.ToString('x2') })
+        $dir = Join-Path $env:LOCALAPPDATA 'KontrolaClearance'
+        $dll = Join-Path $dir "kc-native-$hash.dll"
+        if (-not (Test-Path $dll)) {
+            if (-not (Test-Path $dir)) { [void](New-Item -ItemType Directory -Path $dir) }
+            Get-ChildItem -Path $dir -Filter 'kc-native-*.dll' -ErrorAction SilentlyContinue | Remove-Item -ErrorAction SilentlyContinue
+            Add-Type -TypeDefinition $script:NativeSource -OutputAssembly $dll -OutputType Library -ErrorAction Stop
+        }
+        if (-not ('KlirencCtrlClick' -as [type])) { Add-Type -Path $dll -ErrorAction Stop }
+    } catch {
+        # záloha: kompilace jen v paměti (pomalejší, ale funguje i bez zápisu na disk)
+        if (-not ('KlirencCtrlClick' -as [type])) { Add-Type -TypeDefinition $script:NativeSource }
     }
+}
+try {
+    Import-NativeCode
+    # vlastní identita procesu: okno se neseskupí s ostatními okny PowerShellu a na liště bude ikona KC
     [void][KcTaskbar]::SetCurrentProcessExplicitAppUserModelID('KontrolaClearance.App')
     [void][KcTaskbar]::SetProcessDPIAware()   # ostré vykreslení při zvětšeném zobrazení Windows
 } catch { }
@@ -914,117 +1039,6 @@ $BtnSaveAs.Add_Click({ Invoke-Safe { Save-NotesAs } 'Ukládání se nezdařilo.'
 # v jiném okně než této aplikace se do kliknutého pole vloží aktuální údaj (nahradí jeho obsah).
 $script:MiddleHookOk = $false
 try {
-    if (-not ('KlirencCtrlClick' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-
-public static class KlirencCtrlClick {
-    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT { public int X; public int Y; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData; public uint flags; public uint time; public IntPtr extra; }
-
-    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
-    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
-    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string name);
-    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT pt);
-    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
-    [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
-    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
-
-    private const int WH_MOUSE_LL = 14;
-    private const int WM_LBUTTONDOWN = 0x0201;
-    private const int WM_LBUTTONUP = 0x0202;
-    private const uint LLMHF_INJECTED = 0x01;
-    private const byte VK_CONTROL = 0x11;
-    private const uint KEYUP = 0x0002;
-
-    private static HookProc proc = Callback;   // drží delegáta, aby ho neuklidil GC
-    private static IntPtr hook = IntPtr.Zero;
-    private static bool swallowedDown = false;
-    private static readonly uint ownPid = (uint)Process.GetCurrentProcess().Id;
-
-    public static volatile bool Pending = false;
-    public static volatile bool Enabled = true;
-
-    public static bool Start() {
-        if (hook != IntPtr.Zero) return true;
-        using (Process p = Process.GetCurrentProcess())
-        using (ProcessModule m = p.MainModule) {
-            hook = SetWindowsHookEx(WH_MOUSE_LL, proc, GetModuleHandle(m.ModuleName), 0);
-        }
-        return hook != IntPtr.Zero;
-    }
-
-    public static void Stop() {
-        if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
-    }
-
-    // Leží bod v okně jiné aplikace než tato aplikace?
-    private static bool PointIsOther(POINT pt) {
-        IntPtr w = GetAncestor(WindowFromPoint(pt), 2);
-        if (w == IntPtr.Zero) return false;
-        uint pid;
-        GetWindowThreadProcessId(w, out pid);
-        return pid != 0 && pid != ownPid;
-    }
-
-    // Ctrl + levé kliknutí v jiné aplikaci: původní kliknutí se zahodí (aby se neprovedla akce Ctrl+klik)
-    // a po puštění tlačítka se vloží aktuální údaj
-    private static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam) {
-        try {
-            if (nCode >= 0 && Enabled) {
-                int msg = wParam.ToInt32();
-                if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP) {
-                    MSLLHOOKSTRUCT info = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
-                    if ((info.flags & LLMHF_INJECTED) == 0) {
-                        if (msg == WM_LBUTTONDOWN && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && PointIsOther(info.pt)) {
-                            swallowedDown = true;
-                            return (IntPtr)1;
-                        }
-                        if (msg == WM_LBUTTONUP && swallowedDown) {
-                            swallowedDown = false;
-                            Pending = true;
-                            return (IntPtr)1;
-                        }
-                    }
-                }
-            }
-        } catch { }
-        return CallNextHookEx(hook, nCode, wParam, lParam);
-    }
-
-    private static void CtrlKey(byte vk) {
-        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
-        keybd_event(vk, 0, 0, UIntPtr.Zero);
-        keybd_event(vk, 0, KEYUP, UIntPtr.Zero);
-        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
-    }
-
-    // Pustit Ctrl (uživatel ho ještě drží), obyčejně kliknout na místo kurzoru (aktivuje pole),
-    // označit obsah pole (Ctrl+A) a vložit (Ctrl+V) - obsah pole se nahradí
-    public static void ClickSelectAllPaste() {
-        const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
-        keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
-        System.Threading.Thread.Sleep(20);
-        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
-        System.Threading.Thread.Sleep(80);
-        CtrlKey(0x41);   // A
-        System.Threading.Thread.Sleep(30);
-        CtrlKey(0x56);   // V
-    }
-}
-'@
-    }
     $script:MiddleHookOk = [KlirencCtrlClick]::Start()
 } catch {
     $script:MiddleHookOk = $false
@@ -1055,7 +1069,8 @@ $ctrlTimer.Add_Tick({
 if ($script:MiddleHookOk) { $ctrlTimer.Start() }
 
 $win.Add_Loaded({
-    try { Update-Shortcuts } catch { }
+    # zástupce se aktualizuje až po zobrazení okna, aby nezdržoval start
+    [void]$win.Dispatcher.BeginInvoke([Action]{ try { Update-Shortcuts } catch { } }, [System.Windows.Threading.DispatcherPriority]::ApplicationIdle)
     Update-NotesCaption
     Update-View
     [void]$InputBox.Focus()
