@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '22'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '23'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -495,10 +495,10 @@ function Update-Shortcuts {
     </Border>
 
     <Grid Margin="8">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
 
-      <!-- Levá část -->
-      <Grid Grid.Column="0">
+      <!-- Pravá část: vkládání, seznam a ovládání -->
+      <Grid Grid.Column="1">
         <Grid.RowDefinitions>
           <RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="88"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -585,8 +585,8 @@ function Update-Shortcuts {
         </StackPanel>
       </Grid>
 
-      <!-- Pravá část: poznámky -->
-      <Border Grid.Column="1" Style="{StaticResource Card}">
+      <!-- Levá část: poznámky -->
+      <Border Grid.Column="0" Style="{StaticResource Card}">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>

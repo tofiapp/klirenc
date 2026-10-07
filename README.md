@@ -21,7 +21,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 ## Použití
 
 1. Chcete-li pokračovat v dřívějších poznámkách, klikněte na **Otevřít soubor…** a vyberte `.txt`. Jeho název se zobrazí v poli **Název souboru** a nové zápisy se přidávají na konec.
-2. V Excelu označte celý rozsah řádků přes všechny sloupce (34), stiskněte Ctrl+C a vložte ho do pole vlevo nahoře (Ctrl+V). Aplikace si ponechá jen 3 sloupce, ostatní zahodí hned při vložení:
+2. V Excelu označte celý rozsah řádků přes všechny sloupce (34), stiskněte Ctrl+C a vložte ho do pole vpravo nahoře (Ctrl+V). Aplikace si ponechá jen 3 sloupce, ostatní zahodí hned při vložení:
    - **1. sloupec** = složka (kategorie),
    - **10. sloupec** = *Údaj k ověření*,
    - **poslední sloupec** = poznámka při Vymazat.
