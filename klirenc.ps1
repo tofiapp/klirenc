@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '27'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '28'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -206,7 +206,7 @@ $script:MyPath = $MyInvocation.MyCommand.Path
 $win = $null
 
 # Status: '' = nerozhodnuto, 'keep' = Ponechat, 'del' = Vymazat (poznámka zapsána), 'unsure' = vrátit se později
-# Category = složka (3. sloupec), Station = stanice (9.), Length = délka (10.), MapUrl = odkaz na mapu (16.)
+# Category = složka (3. sloupec), Station = stanice (9.), Length = délka (10.), MapUrl = odkaz na fotku (16.)
 # Manual = záznam přidaný ručně; Num = pořadové číslo (pro zobrazení); Visible = prochází filtrem své složky
 function New-Item2([string]$value, [string]$note, [bool]$manual = $false, [string]$category = '',
                    [string]$station = '', [string]$length = '', [string]$mapUrl = '') {
@@ -253,7 +253,7 @@ $script:ColCategory = 3     # složka (datum RRMMDD)
 $script:ColStation  = 9     # stanice (filtr)
 $script:ColLength   = 10    # délka (filtr)
 $script:ColValue    = 12    # Údaj k ověření
-$script:ColMap      = 16    # odkaz na mapu (dmwmap://…)
+$script:ColMap      = 16    # odkaz na fotku (dmwmap://…)
 $script:ColNote     = 36    # poznámka při Vymazat
 $script:ExcelBook   = '_kontrola_clearance_v4'
 $script:ExcelSheet  = 'ZJISTENI'
@@ -390,7 +390,7 @@ function Read-FromExcel {
     }
     if ($rows.Count -eq 0) { return @{ Ok = $false; Error = "List $($script:ExcelSheet) neobsahuje žádné záznamy (pod záhlavím)." } }
 
-    # Odkaz na mapu: pokud buňka obsahuje hypertextový odkaz nebo vzorec HYPERLINK, vezme se jeho adresa
+    # Odkaz na fotku: pokud buňka obsahuje hypertextový odkaz nebo vzorec HYPERLINK, vezme se jeho adresa
     $links = @{}
     try {
         foreach ($h in $ws.Hyperlinks) {
@@ -665,6 +665,42 @@ function Update-Shortcuts {
       </DataTemplate.Triggers>
     </DataTemplate>
 
+    <!-- Záhlaví složky: šipka, název, filtry stanice / délka, stav (v seznamu i připíchnuté nahoře) -->
+    <DataTemplate x:Key="HeaderTpl">
+                    <Border Background="#E2E8F0" CornerRadius="8" Height="42" Padding="10,0" Cursor="Hand">
+                      <Grid VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="22"/><ColumnDefinition Width="*" MinWidth="70"/><ColumnDefinition Width="170"/><ColumnDefinition Width="110"/><ColumnDefinition Width="72"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Arrow}" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Foreground="#0F172A" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        <Grid Grid.Column="2" Margin="8,0,0,0">
+                          <ToggleButton x:Name="TgS" Style="{StaticResource PickToggle}" Content="{Binding SLabel}" ToolTip="Stanice"/>
+                          <Popup IsOpen="{Binding IsChecked, ElementName=TgS, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TgS}"
+                                 Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Style="{StaticResource PickPopup}" MinWidth="{Binding ActualWidth, ElementName=TgS}">
+                              <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding SOptions}" ItemTemplate="{StaticResource OptTpl}"/>
+                              </ScrollViewer>
+                            </Border>
+                          </Popup>
+                        </Grid>
+                        <Grid Grid.Column="3" Margin="6,0,0,0">
+                          <ToggleButton x:Name="TgL" Style="{StaticResource PickToggle}" Content="{Binding LLabel}" ToolTip="Délka"/>
+                          <Popup IsOpen="{Binding IsChecked, ElementName=TgL, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TgL}"
+                                 Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Style="{StaticResource PickPopup}" MinWidth="{Binding ActualWidth, ElementName=TgL}">
+                              <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding LOptions}" ItemTemplate="{StaticResource OptTpl}"/>
+                              </ScrollViewer>
+                            </Border>
+                          </Popup>
+                        </Grid>
+                        <TextBlock Grid.Column="4" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                      </Grid>
+                    </Border>
+    </DataTemplate>
+
     <!-- Řádek seznamu: aktuální řádek je podbarvený s proužkem vlevo -->
     <Style x:Key="Row" TargetType="ListBoxItem">
       <Style.Triggers>
@@ -729,38 +765,7 @@ function Update-Shortcuts {
                 <DataTemplate>
                   <Grid>
                     <!-- záhlaví složky (kliknutím se rozbalí / sbalí) -->
-                    <Border x:Name="HeaderRow" Visibility="Collapsed" Background="#E2E8F0" CornerRadius="8" Height="42" Padding="10,0" Margin="-8,6,0,2" Cursor="Hand">
-                      <Grid VerticalAlignment="Center">
-                        <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="22"/><ColumnDefinition Width="*" MinWidth="70"/><ColumnDefinition Width="170"/><ColumnDefinition Width="110"/><ColumnDefinition Width="72"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding Arrow}" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Foreground="#0F172A" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                        <Grid Grid.Column="2" Margin="8,0,0,0">
-                          <ToggleButton x:Name="TgS" Style="{StaticResource PickToggle}" Content="{Binding SLabel}" ToolTip="Stanice"/>
-                          <Popup IsOpen="{Binding IsChecked, ElementName=TgS, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TgS}"
-                                 Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
-                            <Border Style="{StaticResource PickPopup}" MinWidth="{Binding ActualWidth, ElementName=TgS}">
-                              <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
-                                <ItemsControl ItemsSource="{Binding SOptions}" ItemTemplate="{StaticResource OptTpl}"/>
-                              </ScrollViewer>
-                            </Border>
-                          </Popup>
-                        </Grid>
-                        <Grid Grid.Column="3" Margin="6,0,0,0">
-                          <ToggleButton x:Name="TgL" Style="{StaticResource PickToggle}" Content="{Binding LLabel}" ToolTip="Délka"/>
-                          <Popup IsOpen="{Binding IsChecked, ElementName=TgL, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TgL}"
-                                 Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
-                            <Border Style="{StaticResource PickPopup}" MinWidth="{Binding ActualWidth, ElementName=TgL}">
-                              <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
-                                <ItemsControl ItemsSource="{Binding LOptions}" ItemTemplate="{StaticResource OptTpl}"/>
-                              </ScrollViewer>
-                            </Border>
-                          </Popup>
-                        </Grid>
-                        <TextBlock Grid.Column="4" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                      </Grid>
-                    </Border>
+                    <ContentControl x:Name="HeaderRow" Visibility="Collapsed" Margin="-8,6,0,2" Content="{Binding}" ContentTemplate="{StaticResource HeaderTpl}"/>
                     <!-- řádek záznamu -->
                     <Grid x:Name="ItemRow" Margin="14,0,0,0">
                       <Grid.ColumnDefinitions>
@@ -785,6 +790,11 @@ function Update-Shortcuts {
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
+            <!-- záhlaví složky připíchnuté nahoře při posouvání seznamu -->
+            <Border x:Name="StickyHeader" Grid.Row="1" VerticalAlignment="Top" Visibility="Collapsed" Margin="1,1,18,0"
+                    Background="#F8FAFC" Padding="4,0,8,4">
+              <ContentControl x:Name="StickyContent" ContentTemplate="{StaticResource HeaderTpl}"/>
+            </Border>
             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
               <Button x:Name="BtnExcel" Style="{StaticResource BtnPrimary}" Content="Načíst z Excelu"/>
               <Button x:Name="BtnLoad" Style="{StaticResource Btn}" Content="Vytvořit seznam" ToolTip="Vytvoří seznam z řádků vložených do pole přes Ctrl+V"/>
@@ -800,7 +810,7 @@ function Update-Shortcuts {
             <Grid DockPanel.Dock="Top">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <TextBlock Text="AKTUÁLNÍ ÚDAJ  •  zkopírováno do schránky" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
-              <Button x:Name="BtnMap" Grid.Column="1" Style="{StaticResource Btn}" Content="Zobrazit na mapě" Padding="14,6" Margin="0,0,6,0"/>
+              <Button x:Name="BtnMap" Grid.Column="1" Style="{StaticResource Btn}" Content="Zobrazit fotku" Padding="14,6" Margin="0,0,6,0"/>
               <Button x:Name="BtnUp" Grid.Column="2" Style="{StaticResource BtnNav}" Content="▲" ToolTip="Předchozí řádek"/>
               <Button x:Name="BtnDown" Grid.Column="3" Style="{StaticResource BtnNav}" Content="▼" ToolTip="Další řádek"/>
             </Grid>
@@ -871,7 +881,7 @@ function Update-Shortcuts {
 
 $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
 foreach ($n in @('ChkCtrl','PosText','InputBox','ItemsList','BtnLoad','BtnClear','CountText',
-                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnMap','BtnExcel','RevisionText','BusyOverlay',
+                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnMap','BtnExcel','RevisionText','BusyOverlay','StickyHeader','StickyContent',
                  'FileNameBox','NotesCaption','NotesBox','BtnOpen','BtnSave','BtnSaveAs')) {
     Set-Variable -Name $n -Value $win.FindName($n) -Scope Script
 }
@@ -1054,6 +1064,7 @@ function Update-ListBox {
         $ItemsList.ItemsSource = $null
         $script:Rows.Clear()
         $ItemsList.Visibility = 'Collapsed'
+        $StickyHeader.Visibility = 'Collapsed'
         $RevisionText.Visibility = 'Collapsed'
         $InputBox.Visibility = 'Visible'
         return
@@ -1365,6 +1376,37 @@ $ItemsList.Add_SelectionChanged({ param($s, $e)
     } 'Přechod na řádek se nezdařil.'
 })
 
+# Připíchnuté záhlaví: při posouvání ukazuje záhlaví složky, jejíž řádky jsou právě nahoře
+function Update-Sticky {
+    if ($ItemsList.Visibility -ne 'Visible' -or $script:Rows.Count -eq 0) { $StickyHeader.Visibility = 'Collapsed'; return }
+    $hit = $ItemsList.InputHitTest((New-Object System.Windows.Point(40, 6)))
+    $c = $null
+    if ($hit -is [System.Windows.DependencyObject]) { $c = [System.Windows.Controls.ItemsControl]::ContainerFromElement($ItemsList, $hit) }
+    if ($null -eq $c -or $null -eq $c.DataContext) { $StickyHeader.Visibility = 'Collapsed'; return }
+    $row = $c.DataContext
+    if ($row.Kind -eq 'H') {
+        # skutečné záhlaví je celé vidět nahoře: připíchnuté není potřeba
+        $top = $c.TranslatePoint((New-Object System.Windows.Point(0, 0)), $ItemsList).Y
+        if ($top -ge -2) { $StickyHeader.Visibility = 'Collapsed'; return }
+    }
+    $h = $script:Headers[$row.Category]
+    if ($null -eq $h) { $StickyHeader.Visibility = 'Collapsed'; return }
+    if (-not [object]::ReferenceEquals($StickyContent.Content, $h)) { $StickyContent.Content = $h }
+    $StickyHeader.Visibility = 'Visible'
+}
+$ItemsList.AddHandler([System.Windows.Controls.ScrollViewer]::ScrollChangedEvent,
+    [System.Windows.Controls.ScrollChangedEventHandler]{ param($s, $e) try { Update-Sticky } catch { } })
+
+# Kliknutí na připíchnuté záhlaví sbalí / rozbalí složku (stejně jako v seznamu)
+$StickyHeader.Add_MouseLeftButtonUp({ param($s, $e) Invoke-Safe {
+    $h = $StickyContent.Content
+    if ($null -eq $h) { return }
+    $cat = $h.Category
+    if ($script:Collapsed.ContainsKey($cat)) { [void]$script:Collapsed.Remove($cat) } else { $script:Collapsed[$cat] = $true }
+    Update-Group $cat
+    $ItemsList.ScrollIntoView($h)
+} 'Složku se nepodařilo sbalit.' })
+
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
 $ItemsList.Add_PreviewKeyDown({ param($s, $e)
     if ($e.OriginalSource -is [System.Windows.Controls.Primitives.ToggleButton]) { return }
@@ -1396,11 +1438,11 @@ function Open-Link([string]$url) {
     return $false
 }
 
-# Zobrazit na mapě: otevře odkaz (dmwmap://…) aktuálního záznamu
+# Zobrazit fotku: otevře odkaz (dmwmap://…) aktuálního záznamu
 $BtnMap.Add_Click({ Invoke-Safe {
     if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
     $url = Get-LinkFromText $script:Items[$script:Index].MapUrl
-    if ($url -eq '') { Show-Warn "Aktuální záznam nemá odkaz na mapu ($($script:ColMap). sloupec je prázdný)."; return }
+    if ($url -eq '') { Show-Warn "Aktuální záznam nemá odkaz na fotku ($($script:ColMap). sloupec je prázdný)."; return }
     if ($url -notmatch '^[A-Za-z][A-Za-z0-9+.\-]*://') {
         Show-Warn "V $($script:ColMap). sloupci není odkaz (nezačíná dmwmap://):`n$url"
         return
