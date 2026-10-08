@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '24'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '25'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -350,6 +350,35 @@ function Read-FromExcel {
         $rows.Add(@{ Fields = $g.Fields; RowNo = $sheetRow })
     }
     if ($rows.Count -eq 0) { return @{ Ok = $false; Error = "List $($script:ExcelSheet) neobsahuje žádné záznamy (pod záhlavím)." } }
+
+    # Odkaz na mapu: pokud buňka obsahuje hypertextový odkaz nebo vzorec HYPERLINK, vezme se jeho adresa
+    $links = @{}
+    try {
+        foreach ($h in $ws.Hyperlinks) {
+            try {
+                if ([int]$h.Range.Column -eq $script:ColMap) {
+                    $a = [string]$h.Address
+                    if ([string]$h.SubAddress -ne '') { $a = $a + '#' + [string]$h.SubAddress }
+                    if ($a -ne '') { $links[[int]$h.Range.Row] = $a }
+                }
+            } catch { }
+        }
+    } catch { }
+    try {
+        $lastRow = $firstRow + ($r1 - $r0)
+        $fr = $ws.Range($ws.Cells($firstRow, $script:ColMap), $ws.Cells($lastRow, $script:ColMap)).Formula
+        if ($fr -is [array]) {
+            $fr0 = $fr.GetLowerBound(0); $fc0 = $fr.GetLowerBound(1)
+            for ($k = $fr0; $k -le $fr.GetUpperBound(0); $k++) {
+                $fx = [string]$fr[$k, $fc0]
+                if ($fx -match '(?i)^=\s*HYPERLINK\(\s*"([^"]+)"') { $links[$firstRow + ($k - $fr0)] = $Matches[1] }
+            }
+        }
+    } catch { }
+    foreach ($row in $rows) {
+        $f = $row.Fields
+        if ($f[5] -notmatch '://' -and $links.ContainsKey([int]$row.RowNo)) { $f[5] = $links[[int]$row.RowNo] }
+    }
     return (ConvertFrom-FieldRows $rows)
 }
 
@@ -554,6 +583,64 @@ function Update-Shortcuts {
       <Setter Property="Padding" Value="8,6"/>
     </Style>
 
+    <!-- Výběr (stanice / délka) ve stylu aplikace -->
+    <Style x:Key="PickItem" TargetType="ComboBoxItem">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="Bd" Background="Transparent" Padding="10,5" CornerRadius="4">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Bd" Property="Background" Value="#F1F5F9"/></Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBg}"/>
+                <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Pick" TargetType="ComboBox">
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="ItemContainerStyle" Value="{StaticResource PickItem}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid>
+              <ToggleButton Focusable="False" ClickMode="Press"
+                            IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="B" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6">
+                      <TextBlock Text="▾" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,9,0" Foreground="#64748B"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#0E7490"/></Trigger>
+                      <Trigger Property="IsChecked" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#0E7490"/></Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}"
+                                Margin="10,0,26,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+              <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,3,0,0"
+                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="320">
+                  <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- Řádek seznamu: aktuální řádek je podbarvený s proužkem vlevo -->
     <Style x:Key="Row" TargetType="ListBoxItem">
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -591,12 +678,12 @@ function Update-Shortcuts {
     </Border>
 
     <Grid Margin="8">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="1*" MinWidth="280"/><ColumnDefinition Width="2.4*"/></Grid.ColumnDefinitions>
 
       <!-- Pravá část: vkládání, seznam a ovládání -->
       <Grid Grid.Column="1">
         <Grid.RowDefinitions>
-          <RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="88"/><RowDefinition Height="Auto"/>
+          <RowDefinition Height="3*"/><RowDefinition Height="1.3*" MinHeight="150"/><RowDefinition Height="80"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Vstup / seznam -->
@@ -613,18 +700,18 @@ function Update-Shortcuts {
                 <DataTemplate>
                   <Grid>
                     <!-- záhlaví složky (kliknutím se rozbalí / sbalí) -->
-                    <Border x:Name="HeaderRow" Visibility="Collapsed" Background="#E2E8F0" CornerRadius="6" Padding="8,5" Margin="-8,4,0,2" Cursor="Hand">
-                      <Grid>
+                    <Border x:Name="HeaderRow" Visibility="Collapsed" Background="#E2E8F0" CornerRadius="8" Height="42" Padding="10,0" Margin="-8,6,0,2" Cursor="Hand">
+                      <Grid VerticalAlignment="Center">
                         <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                          <ColumnDefinition Width="22"/><ColumnDefinition Width="*" MinWidth="70"/><ColumnDefinition Width="170"/><ColumnDefinition Width="110"/><ColumnDefinition Width="72"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="{Binding Arrow}" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Foreground="#0F172A" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                        <ComboBox Grid.Column="2" Tag="S" Width="160" Margin="8,0,0,0" Cursor="Arrow" ToolTip="Stanice" FontSize="12"
+                        <ComboBox Grid.Column="2" Tag="S" Style="{StaticResource Pick}" Margin="8,0,0,0" ToolTip="Stanice"
                                   ItemsSource="{Binding Stations}" SelectedItem="{Binding SelS, Mode=OneWay}"/>
-                        <ComboBox Grid.Column="3" Tag="L" Width="110" Margin="6,0,0,0" Cursor="Arrow" ToolTip="Délka" FontSize="12"
+                        <ComboBox Grid.Column="3" Tag="L" Style="{StaticResource Pick}" Margin="6,0,0,0" ToolTip="Délka"
                                   ItemsSource="{Binding Lengths}" SelectedItem="{Binding SelL, Mode=OneWay}"/>
-                        <TextBlock Grid.Column="4" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" Margin="10,0,4,0"/>
+                        <TextBlock Grid.Column="4" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                       </Grid>
                     </Border>
                     <!-- řádek záznamu -->
@@ -671,7 +758,7 @@ function Update-Shortcuts {
               <Button x:Name="BtnDown" Grid.Column="3" Style="{StaticResource BtnNav}" Content="▼" ToolTip="Další řádek"/>
             </Grid>
             <TextBlock x:Name="CurrentNote" DockPanel.Dock="Bottom" TextAlignment="Center" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,6,0,0"/>
-            <TextBlock x:Name="CurrentText" FontSize="34" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
+            <TextBlock x:Name="CurrentText" FontSize="26" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center" HorizontalAlignment="Center"/>
           </DockPanel>
         </Border>
@@ -1112,13 +1199,39 @@ $ItemsList.Add_PreviewKeyDown({ param($s, $e)
     }
 })
 
-# Zobrazit na mapě: otevře odkaz (dmwmap://…) aktuálního záznamu v aplikaci, která ho umí otevřít
+# Odkaz z textu buňky: pokud je v textu něco navíc, vezme se jen část „schéma://…“
+function Get-LinkFromText([string]$t) {
+    $t = $t.Trim().Trim('"')
+    $m = [regex]::Match($t, '[A-Za-z][A-Za-z0-9+.\-]*://\S+')
+    if ($m.Success) { return $m.Value }
+    return $t
+}
+
+# Otevře odkaz v aplikaci zaregistrované ve Windows (dmwmap:// apod.); zkusí víc způsobů
+function Open-Link([string]$url) {
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo $url
+        $psi.UseShellExecute = $true
+        [void][System.Diagnostics.Process]::Start($psi)
+        return $true
+    } catch { }
+    try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $url + '"'); return $true } catch { }
+    try { Start-Process -FilePath 'rundll32.exe' -ArgumentList 'url.dll,FileProtocolHandler', $url; return $true } catch { }
+    return $false
+}
+
+# Zobrazit na mapě: otevře odkaz (dmwmap://…) aktuálního záznamu
 $BtnMap.Add_Click({ Invoke-Safe {
     if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
-    $url = $script:Items[$script:Index].MapUrl
+    $url = Get-LinkFromText $script:Items[$script:Index].MapUrl
     if ($url -eq '') { Show-Warn "Aktuální záznam nemá odkaz na mapu ($($script:ColMap). sloupec je prázdný)."; return }
-    try { Start-Process $url }
-    catch { Show-Error "Odkaz se nepodařilo otevřít:`n$url`n`nZkontrolujte, že je v počítači aplikace pro odkazy dmwmap://." }
+    if ($url -notmatch '^[A-Za-z][A-Za-z0-9+.\-]*://') {
+        Show-Warn "V $($script:ColMap). sloupci není odkaz (nezačíná dmwmap://):`n$url"
+        return
+    }
+    if (-not (Open-Link $url)) {
+        Show-Error "Odkaz se nepodařilo otevřít:`n$url`n`nZkontrolujte, že je v počítači aplikace pro odkazy dmwmap://."
+    }
 } 'Odkaz se nepodařilo otevřít.' })
 
 $BtnYes.Add_Click({ Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' })
