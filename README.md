@@ -30,7 +30,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - **36.** poznámka při Vymazat.
 
    Záloha: řádky lze také zkopírovat z Excelu, vložit do pole (Ctrl+V) a kliknout na **Vytvořit seznam**.
-3. Záznamy jsou roztříděné do **složek** podle data a času v názvu (RRMMDD_HHMMSS) od nejstarší. Po načtení jsou všechny složky sbalené, kliknutím na záhlaví složky ji rozbalíte nebo sbalíte. V záhlaví jsou dva filtry, **stanice** a **délka**, se zaškrtávacím seznamem jako v Excelu (Vše / jednotlivé hodnoty). Odškrtnuté záznamy se schovají a šipky i Ponechat / Vymazat procházejí jen zobrazené záznamy.
+3. Záznamy jsou roztříděné do **složek** podle data a času v názvu (RRMMDD_HHMMSS) od nejstarší. Po načtení jsou všechny složky sbalené, kliknutím na záhlaví složky ji rozbalíte nebo sbalíte. V záhlaví jsou dva filtry, **stanice** a **délka**, se zaškrtávacím seznamem jako v Excelu (Vše / jednotlivé hodnoty). Filtry se navzájem ovlivňují: v nabídce délek jsou jen délky, které zůstaly po výběru stanic, a naopak. Odškrtnuté záznamy se schovají a šipky i Ponechat / Vymazat procházejí jen zobrazené záznamy.
 4. Aktuální hodnota se zobrazí velkým písmem a je vždy zkopírovaná ve schránce. Značky v seznamu: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později.
    - **Ponechat** označí řádek ✓, **Vymazat** zapíše poznámku a označí řádek ✗, **? Vrátit se později** označí řádek ?.
    - Po rozhodnutí se přejde na další nerozhodnutý zobrazený řádek.
