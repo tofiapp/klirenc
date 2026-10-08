@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '26'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '27'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -132,7 +132,7 @@ public class KcNotify : System.ComponentModel.INotifyPropertyChanged {
 }
 public class KcRow : KcNotify {
     string kind = "I", category = "", title = "", arrow = "", progress = "", num = "", value = "", note = "", status = "", sLabel = "", lLabel = "";
-    bool manual; int index; object sOptions, lOptions;
+    bool manual, hidden; int index; object sOptions, lOptions;
     public string Kind { get { return kind; } set { Set(ref kind, value, "Kind"); } }
     public string Category { get { return category; } set { Set(ref category, value, "Category"); } }
     public string Title { get { return title; } set { Set(ref title, value, "Title"); } }
@@ -145,6 +145,7 @@ public class KcRow : KcNotify {
     public string SLabel { get { return sLabel; } set { Set(ref sLabel, value, "SLabel"); } }
     public string LLabel { get { return lLabel; } set { Set(ref lLabel, value, "LLabel"); } }
     public bool Manual { get { return manual; } set { Set(ref manual, value, "Manual"); } }
+    public bool Hidden { get { return hidden; } set { Set(ref hidden, value, "Hidden"); } }
     public int Index { get { return index; } set { Set(ref index, value, "Index"); } }
     public object SOptions { get { return sOptions; } set { Set(ref sOptions, value, "SOptions"); } }
     public object LOptions { get { return lOptions; } set { Set(ref lOptions, value, "LOptions"); } }
@@ -206,11 +207,11 @@ $win = $null
 
 # Status: '' = nerozhodnuto, 'keep' = Ponechat, 'del' = Vymazat (poznámka zapsána), 'unsure' = vrátit se později
 # Category = složka (3. sloupec), Station = stanice (9.), Length = délka (10.), MapUrl = odkaz na mapu (16.)
-# Manual = záznam přidaný ručně; Num = pořadové číslo (pro zobrazení)
+# Manual = záznam přidaný ručně; Num = pořadové číslo (pro zobrazení); Visible = prochází filtrem své složky
 function New-Item2([string]$value, [string]$note, [bool]$manual = $false, [string]$category = '',
                    [string]$station = '', [string]$length = '', [string]$mapUrl = '') {
     [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual; Num = 0; Category = $category
-                       Station = $station; Length = $length; MapUrl = $mapUrl }
+                       Station = $station; Length = $length; MapUrl = $mapUrl; Visible = $true }
 }
 
 function Show-Msg([string]$text, [string]$icon) {
@@ -420,16 +421,19 @@ function Read-FromExcel {
     return (ConvertFrom-FieldRows $rows)
 }
 
-# Klíč pro řazení složek: datum RRMMDD z názvu složky (první šestice číslic). Bez data = $null.
+# Klíč pro řazení složek: datum a čas RRMMDD_HHMMSS z názvu složky (čas je nepovinný). Bez data = $null.
 function Get-CategoryDateKey([string]$category) {
-    if ($category -match '(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)') {
+    if ($category -match '(?<!\d)(\d{2})(\d{2})(\d{2})(?:_(\d{6}))?(?!\d)') {
         $m = [int]$Matches[2]; $d = [int]$Matches[3]
-        if ($m -ge 1 -and $m -le 12 -and $d -ge 1 -and $d -le 31) { return $Matches[1] + $Matches[2] + $Matches[3] }
+        if ($m -ge 1 -and $m -le 12 -and $d -ge 1 -and $d -le 31) {
+            $time = if ($Matches[4]) { $Matches[4] } else { '000000' }
+            return $Matches[1] + $Matches[2] + $Matches[3] + $time
+        }
     }
     return $null
 }
 
-# Seřadí záznamy do složek. Složky jsou seřazené podle data RRMMDD v názvu od nejstarší;
+# Seřadí záznamy do složek. Složky jsou seřazené podle data a času RRMMDD_HHMMSS v názvu od nejstarší;
 # složky bez data jsou na konci v pořadí prvního výskytu. Uvnitř složky zůstává původní pořadí.
 function Group-Items($list) {
     $groups = [ordered]@{}
@@ -663,6 +667,9 @@ function Update-Shortcuts {
 
     <!-- Řádek seznamu: aktuální řádek je podbarvený s proužkem vlevo -->
     <Style x:Key="Row" TargetType="ListBoxItem">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Hidden}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+      </Style.Triggers>
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
       <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
@@ -823,7 +830,7 @@ function Update-Shortcuts {
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
           <TextBlock Text="Název souboru (.txt)" FontWeight="SemiBold"/>
-          <TextBox x:Name="FileNameBox" Grid.Row="1" Style="{StaticResource Field}" Margin="0,6,0,14" FontSize="15"/>
+          <TextBox x:Name="FileNameBox" Grid.Row="1" Style="{StaticResource Field}" Margin="0,6,0,14" FontSize="15" Text="Clearance revize "/>
           <TextBlock x:Name="NotesCaption" Grid.Row="2" Text="Poznámky  •  zatím neuloženo" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,0,6"/>
           <TextBox x:Name="NotesBox" Grid.Row="3" Style="{StaticResource Field}" AcceptsReturn="True" TextWrapping="Wrap"
                    FontFamily="Consolas" FontSize="13" VerticalScrollBarVisibility="Auto"/>
@@ -906,14 +913,12 @@ function Get-GroupFilter([string]$cat) {
 }
 function Get-OptText([string]$v) { if ($v -eq '') { $script:EmptyLabel } else { $v } }
 # Je záznam vidět (prochází filtrem své složky)?
-function Test-Visible($it) {
-    $f = Get-GroupFilter $it.Category
-    (-not $f.S.Contains((Get-OptText $it.Station))) -and (-not $f.L.Contains((Get-OptText $it.Length)))
-}
+# (počítá se jen při změně filtru dané složky, viz Update-Group)
+function Test-Visible($it) { [bool]$it.Visible }
 # Indexy viditelných záznamů v pořadí seznamu
 function Get-VisibleIndexes {
     $v = New-Object System.Collections.Generic.List[int]
-    for ($i = 0; $i -lt $script:Items.Count; $i++) { if (Test-Visible $script:Items[$i]) { $v.Add($i) } }
+    for ($i = 0; $i -lt $script:Items.Count; $i++) { if ($script:Items[$i].Visible) { $v.Add($i) } }
     return ,$v
 }
 # Hodnoty pro výběr: čísla (např. délka) podle hodnoty, text abecedně
@@ -986,7 +991,7 @@ function Update-Header([string]$cat) {
     $vis = 0; $done = 0
     for ($k = $r[0]; $k -le $r[1]; $k++) {
         $it = $script:Items[$k]
-        if (Test-Visible $it) { $vis++; if ($it.Status -eq 'keep' -or $it.Status -eq 'del') { $done++ } }
+        if ($it.Visible) { $vis++; if ($it.Status -eq 'keep' -or $it.Status -eq 'del') { $done++ } }
     }
     $h.Arrow = if ($script:Collapsed.ContainsKey($cat)) { '▸' } else { '▾' }
     $h.Progress = "$done / $vis"
@@ -994,30 +999,19 @@ function Update-Header([string]$cat) {
     $h.LLabel = Get-FilterLabel $h.LOptions
 }
 
-# Znovu vyplní řádky jedné složky (po sbalení / rozbalení nebo změně filtru); záhlaví zůstává
+# Přepočítá jednu složku (po sbalení / rozbalení nebo změně filtru): řádky se jen schovají / ukážou,
+# seznam se nepřestavuje a ostatní složky se neprocházejí
 function Update-Group([string]$cat) {
-    $h = $script:Headers[$cat]
-    $pos = $script:Rows.IndexOf($h)
-    $script:Syncing = $true
-    try {
-        while ($pos + 1 -lt $script:Rows.Count -and $script:Rows[$pos + 1].Kind -eq 'I' -and $script:Rows[$pos + 1].Category -eq $cat) {
-            $script:Rows.RemoveAt($pos + 1)
-        }
-        $r = $script:GroupRange[$cat]
-        for ($k = $r[0]; $k -le $r[1]; $k++) { $script:RowOf.Remove($k) }
-        if (-not $script:Collapsed.ContainsKey($cat)) {
-            $at = $pos + 1
-            for ($k = $r[0]; $k -le $r[1]; $k++) {
-                $it = $script:Items[$k]
-                if (-not (Test-Visible $it)) { continue }
-                $row = New-Object KcRow
-                $row.Kind = 'I'; $row.Category = $cat; $row.Num = [string]($k + 1); $row.Value = $it.Value; $row.Note = $it.Note
-                $row.Status = $it.Status; $row.Manual = [bool]$it.Manual; $row.Index = $k
-                $script:Rows.Insert($at, $row); $at++
-                $script:RowOf[$k] = $row
-            }
-        }
-    } finally { $script:Syncing = $false }
+    $r = $script:GroupRange[$cat]
+    $f = Get-GroupFilter $cat
+    $collapsed = $script:Collapsed.ContainsKey($cat)
+    $noS = ($f.S.Count -eq 0); $noL = ($f.L.Count -eq 0)
+    for ($k = $r[0]; $k -le $r[1]; $k++) {
+        $it = $script:Items[$k]
+        $vis = ($noS -or -not $f.S.Contains((Get-OptText $it.Station))) -and ($noL -or -not $f.L.Contains((Get-OptText $it.Length)))
+        $it.Visible = $vis
+        $script:RowOf[$k].Hidden = ($collapsed -or -not $vis)
+    }
     Update-Header $cat
 }
 
@@ -1039,6 +1033,14 @@ function Build-List {
             $h.LOptions = New-Options $cat 'L' $groupItems
             $script:Headers[$cat] = $h
             $script:Rows.Add($h)
+            for ($k = $i; $k -lt $j; $k++) {
+                $it = $script:Items[$k]
+                $row = New-Object KcRow
+                $row.Kind = 'I'; $row.Category = $cat; $row.Num = [string]($k + 1); $row.Value = $it.Value; $row.Note = $it.Note
+                $row.Status = $it.Status; $row.Manual = [bool]$it.Manual; $row.Index = $k
+                $script:Rows.Add($row)
+                $script:RowOf[$k] = $row
+            }
             $i = $j
         }
     } finally { $script:Syncing = $false }
@@ -1058,7 +1060,7 @@ function Update-ListBox {
     }
     $script:Syncing = $true
     try {
-        if (-not $script:Done -and $script:RowOf.ContainsKey($script:Index)) {
+        if (-not $script:Done -and $script:RowOf.ContainsKey($script:Index) -and -not $script:RowOf[$script:Index].Hidden) {
             $row = $script:RowOf[$script:Index]
             $ItemsList.SelectedItem = $row
             $ItemsList.ScrollIntoView($row)
@@ -1128,7 +1130,7 @@ function Move-NextUndecided([bool]$expand = $true) {
     foreach ($wanted in @('', 'unsure')) {
         for ($k = 1; $k -le $count; $k++) {
             $i = ($script:Index + $k) % $count
-            if ($script:Items[$i].Status -eq $wanted -and (Test-Visible $script:Items[$i])) {
+            if ($script:Items[$i].Status -eq $wanted -and $script:Items[$i].Visible) {
                 $script:Index = $i
                 $script:Done = $false
                 Show-Current $expand
@@ -1448,6 +1450,9 @@ $BtnSave.Add_Click({ Invoke-Safe {
 } 'Ukládání se nezdařilo.' })
 
 $BtnSaveAs.Add_Click({ Invoke-Safe { Save-NotesAs } 'Ukládání se nezdařilo.' })
+
+# Název souboru má předvolbu „Clearance revize “ - po kliknutí do pole je kurzor na konci, aby se dalo rovnou dopsat
+$FileNameBox.Add_GotKeyboardFocus({ $FileNameBox.CaretIndex = $FileNameBox.Text.Length })
 
 # ---------- Vkládání Ctrl + kliknutím do jiné aplikace ----------
 # Globální sledování myši (funkce Windows, bez instalace). Při Ctrl + levém kliknutí

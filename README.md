@@ -30,7 +30,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - **36.** poznámka při Vymazat.
 
    Záloha: řádky lze také zkopírovat z Excelu, vložit do pole (Ctrl+V) a kliknout na **Vytvořit seznam**.
-3. Záznamy jsou roztříděné do **složek** podle data od nejstarší. Po načtení jsou všechny složky sbalené, kliknutím na záhlaví složky ji rozbalíte nebo sbalíte. V záhlaví jsou dva filtry, **stanice** a **délka**, se zaškrtávacím seznamem jako v Excelu (Vše / jednotlivé hodnoty). Odškrtnuté záznamy se schovají a šipky i Ponechat / Vymazat procházejí jen zobrazené záznamy.
+3. Záznamy jsou roztříděné do **složek** podle data a času v názvu (RRMMDD_HHMMSS) od nejstarší. Po načtení jsou všechny složky sbalené, kliknutím na záhlaví složky ji rozbalíte nebo sbalíte. V záhlaví jsou dva filtry, **stanice** a **délka**, se zaškrtávacím seznamem jako v Excelu (Vše / jednotlivé hodnoty). Odškrtnuté záznamy se schovají a šipky i Ponechat / Vymazat procházejí jen zobrazené záznamy.
 4. Aktuální hodnota se zobrazí velkým písmem a je vždy zkopírovaná ve schránce. Značky v seznamu: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později.
    - **Ponechat** označí řádek ✓, **Vymazat** zapíše poznámku a označí řádek ✗, **? Vrátit se později** označí řádek ?.
    - Po rozhodnutí se přejde na další nerozhodnutý zobrazený řádek.
@@ -40,5 +40,6 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
 7. Ukládání poznámek (vždy UTF-8 `.txt`):
    - **Otevřít soubor…** načte dřívější poznámky, nové zápisy se přidávají na konec.
+   - Pole **Název souboru** má předvolbu „Clearance revize “, za kterou dopíšete zbytek názvu.
    - **Uložit** zapíše do otevřeného souboru. Pokud jste v poli **Název souboru** změnili název, soubor se ve stejné složce přejmenuje.
    - **Uložit jako…** se zeptá na nové umístění.
