@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '28'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '29'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -1058,8 +1058,9 @@ function Build-List {
     $ItemsList.ItemsSource = $script:Rows
 }
 
-# Zvýrazní aktuální řádek v seznamu (bez přestavění seznamu)
-function Update-ListBox {
+# Zvýrazní aktuální řádek v seznamu (bez přestavění seznamu).
+# $scroll: posunout seznam na aktuální řádek - jen při přechodu na jiný řádek, ne při rozbalení složky nebo filtru
+function Update-ListBox([bool]$scroll = $false) {
     if ($script:Items.Count -eq 0) {
         $ItemsList.ItemsSource = $null
         $script:Rows.Clear()
@@ -1074,7 +1075,7 @@ function Update-ListBox {
         if (-not $script:Done -and $script:RowOf.ContainsKey($script:Index) -and -not $script:RowOf[$script:Index].Hidden) {
             $row = $script:RowOf[$script:Index]
             $ItemsList.SelectedItem = $row
-            $ItemsList.ScrollIntoView($row)
+            if ($scroll) { $ItemsList.ScrollIntoView($row) }
         } else {
             $ItemsList.SelectedIndex = -1
         }
@@ -1085,7 +1086,7 @@ function Update-ListBox {
     } finally { $script:Syncing = $false }
 }
 
-function Update-View {
+function Update-View([bool]$scroll = $false) {
     $vis = Get-VisibleIndexes
     $count = $script:Items.Count
     $on = ($count -gt 0 -and -not $script:Done -and (Test-Visible $script:Items[$script:Index]))
@@ -1116,7 +1117,7 @@ function Update-View {
         if ($item.Manual) { $info += '   •   vloženo ručně' }
         $CurrentNote.Text = $info
     }
-    Update-ListBox
+    Update-ListBox $scroll
 }
 
 # Zobrazí aktuální řádek a zkopíruje jeho první hodnotu do schránky.
@@ -1126,7 +1127,7 @@ function Show-Current([bool]$expand = $true) {
         $cat = $script:Items[$script:Index].Category
         if ($script:Collapsed.ContainsKey($cat)) { $script:Collapsed.Remove($cat); Update-Group $cat }
     }
-    Update-View
+    Update-View $true
     if (-not $script:Done -and $script:Index -lt $script:Items.Count -and (Test-Visible $script:Items[$script:Index])) {
         if (-not (Set-ClipboardText $script:Items[$script:Index].Value)) {
             Show-Warn 'Hodnotu se nepodařilo zkopírovat do schránky (schránka je možná obsazená jinou aplikací).'
