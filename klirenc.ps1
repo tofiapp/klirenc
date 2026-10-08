@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '25'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '26'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -118,6 +118,44 @@ public static class KlirencCtrlClick {
         System.Threading.Thread.Sleep(30);
         CtrlKey(0x56);   // V
     }
+}
+
+// Řádky seznamu a položky filtrů: hlásí změny, takže se seznam nemusí pokaždé celý překreslovat
+public class KcNotify : System.ComponentModel.INotifyPropertyChanged {
+    public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+    protected void Set<T>(ref T field, T value, string name) {
+        if (object.Equals(field, value)) return;
+        field = value;
+        var h = PropertyChanged;
+        if (h != null) h(this, new System.ComponentModel.PropertyChangedEventArgs(name));
+    }
+}
+public class KcRow : KcNotify {
+    string kind = "I", category = "", title = "", arrow = "", progress = "", num = "", value = "", note = "", status = "", sLabel = "", lLabel = "";
+    bool manual; int index; object sOptions, lOptions;
+    public string Kind { get { return kind; } set { Set(ref kind, value, "Kind"); } }
+    public string Category { get { return category; } set { Set(ref category, value, "Category"); } }
+    public string Title { get { return title; } set { Set(ref title, value, "Title"); } }
+    public string Arrow { get { return arrow; } set { Set(ref arrow, value, "Arrow"); } }
+    public string Progress { get { return progress; } set { Set(ref progress, value, "Progress"); } }
+    public string Num { get { return num; } set { Set(ref num, value, "Num"); } }
+    public string Value { get { return value; } set { Set(ref this.value, value, "Value"); } }
+    public string Note { get { return note; } set { Set(ref note, value, "Note"); } }
+    public string Status { get { return status; } set { Set(ref status, value, "Status"); } }
+    public string SLabel { get { return sLabel; } set { Set(ref sLabel, value, "SLabel"); } }
+    public string LLabel { get { return lLabel; } set { Set(ref lLabel, value, "LLabel"); } }
+    public bool Manual { get { return manual; } set { Set(ref manual, value, "Manual"); } }
+    public int Index { get { return index; } set { Set(ref index, value, "Index"); } }
+    public object SOptions { get { return sOptions; } set { Set(ref sOptions, value, "SOptions"); } }
+    public object LOptions { get { return lOptions; } set { Set(ref lOptions, value, "LOptions"); } }
+}
+public class KcOption : KcNotify {
+    string text = "", kind = "", category = ""; bool isChecked = true, isAll;
+    public string Text { get { return text; } set { Set(ref text, value, "Text"); } }
+    public string Kind { get { return kind; } set { Set(ref kind, value, "Kind"); } }
+    public string Category { get { return category; } set { Set(ref category, value, "Category"); } }
+    public bool Checked { get { return isChecked; } set { Set(ref isChecked, value, "Checked"); } }
+    public bool IsAll { get { return isAll; } set { Set(ref isAll, value, "IsAll"); } }
 }
 
 public static class KcTaskbar {
@@ -583,63 +621,45 @@ function Update-Shortcuts {
       <Setter Property="Padding" Value="8,6"/>
     </Style>
 
-    <!-- Výběr (stanice / délka) ve stylu aplikace -->
-    <Style x:Key="PickItem" TargetType="ComboBoxItem">
+    <!-- Výběr (stanice / délka) s více volbami, jako filtr v Excelu -->
+    <Style x:Key="PickToggle" TargetType="ToggleButton">
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Focusable" Value="False"/>
       <Setter Property="Template">
         <Setter.Value>
-          <ControlTemplate TargetType="ComboBoxItem">
-            <Border x:Name="Bd" Background="Transparent" Padding="10,5" CornerRadius="4">
-              <ContentPresenter/>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="B" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="10,0,8,0">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="{TemplateBinding Content}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="▾" Foreground="#64748B" VerticalAlignment="Center" Margin="6,0,0,0"/>
+              </Grid>
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Bd" Property="Background" Value="#F1F5F9"/></Trigger>
-              <Trigger Property="IsSelected" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBg}"/>
-                <Setter Property="Foreground" Value="{StaticResource Accent}"/>
-              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#0E7490"/></Trigger>
+              <Trigger Property="IsChecked" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#0E7490"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
-    <Style x:Key="Pick" TargetType="ComboBox">
-      <Setter Property="Height" Value="28"/>
-      <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Foreground" Value="#0F172A"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-      <Setter Property="ItemContainerStyle" Value="{StaticResource PickItem}"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="ComboBox">
-            <Grid>
-              <ToggleButton Focusable="False" ClickMode="Press"
-                            IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
-                <ToggleButton.Template>
-                  <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="B" Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6">
-                      <TextBlock Text="▾" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,9,0" Foreground="#64748B"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#0E7490"/></Trigger>
-                      <Trigger Property="IsChecked" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#0E7490"/></Trigger>
-                    </ControlTemplate.Triggers>
-                  </ControlTemplate>
-                </ToggleButton.Template>
-              </ToggleButton>
-              <ContentPresenter IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}"
-                                Margin="10,0,26,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
-              <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
-                <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,3,0,0"
-                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="320">
-                  <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer>
-                </Border>
-              </Popup>
-            </Grid>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
+    <Style x:Key="PickPopup" TargetType="Border">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#CBD5E1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="6"/>
+      <Setter Property="Margin" Value="0,4,0,0"/>
     </Style>
+    <DataTemplate x:Key="OptTpl">
+      <CheckBox x:Name="Cb" Content="{Binding Text}" IsChecked="{Binding Checked, Mode=TwoWay}" Margin="4,3" FontSize="12" Cursor="Hand"/>
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsAll}" Value="True"><Setter TargetName="Cb" Property="FontWeight" Value="SemiBold"/></DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
 
     <!-- Řádek seznamu: aktuální řádek je podbarvený s proužkem vlevo -->
     <Style x:Key="Row" TargetType="ListBoxItem">
@@ -664,6 +684,7 @@ function Update-Shortcuts {
     </Style>
   </Window.Resources>
 
+  <Grid>
   <DockPanel>
     <!-- Hlavička -->
     <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="20,12">
@@ -695,7 +716,8 @@ function Update-Shortcuts {
                      FontFamily="Consolas" FontSize="13" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
             <ListBox x:Name="ItemsList" Grid.Row="1" Visibility="Collapsed" BorderThickness="1" BorderBrush="{StaticResource Line}" Background="#F8FAFC"
                      ItemContainerStyle="{StaticResource Row}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     VirtualizingStackPanel.IsVirtualizing="True">
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel">
               <ListBox.ItemTemplate>
                 <DataTemplate>
                   <Grid>
@@ -707,10 +729,28 @@ function Update-Shortcuts {
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="{Binding Arrow}" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Foreground="#0F172A" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                        <ComboBox Grid.Column="2" Tag="S" Style="{StaticResource Pick}" Margin="8,0,0,0" ToolTip="Stanice"
-                                  ItemsSource="{Binding Stations}" SelectedItem="{Binding SelS, Mode=OneWay}"/>
-                        <ComboBox Grid.Column="3" Tag="L" Style="{StaticResource Pick}" Margin="6,0,0,0" ToolTip="Délka"
-                                  ItemsSource="{Binding Lengths}" SelectedItem="{Binding SelL, Mode=OneWay}"/>
+                        <Grid Grid.Column="2" Margin="8,0,0,0">
+                          <ToggleButton x:Name="TgS" Style="{StaticResource PickToggle}" Content="{Binding SLabel}" ToolTip="Stanice"/>
+                          <Popup IsOpen="{Binding IsChecked, ElementName=TgS, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TgS}"
+                                 Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Style="{StaticResource PickPopup}" MinWidth="{Binding ActualWidth, ElementName=TgS}">
+                              <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding SOptions}" ItemTemplate="{StaticResource OptTpl}"/>
+                              </ScrollViewer>
+                            </Border>
+                          </Popup>
+                        </Grid>
+                        <Grid Grid.Column="3" Margin="6,0,0,0">
+                          <ToggleButton x:Name="TgL" Style="{StaticResource PickToggle}" Content="{Binding LLabel}" ToolTip="Délka"/>
+                          <Popup IsOpen="{Binding IsChecked, ElementName=TgL, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=TgL}"
+                                 Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade">
+                            <Border Style="{StaticResource PickPopup}" MinWidth="{Binding ActualWidth, ElementName=TgL}">
+                              <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding LOptions}" ItemTemplate="{StaticResource OptTpl}"/>
+                              </ScrollViewer>
+                            </Border>
+                          </Popup>
+                        </Grid>
                         <TextBlock Grid.Column="4" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                       </Grid>
                     </Border>
@@ -787,21 +827,44 @@ function Update-Shortcuts {
           <TextBlock x:Name="NotesCaption" Grid.Row="2" Text="Poznámky  •  zatím neuloženo" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,0,6"/>
           <TextBox x:Name="NotesBox" Grid.Row="3" Style="{StaticResource Field}" AcceptsReturn="True" TextWrapping="Wrap"
                    FontFamily="Consolas" FontSize="13" VerticalScrollBarVisibility="Auto"/>
-          <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,12,0,0">
-            <Button x:Name="BtnOpen" Style="{StaticResource Btn}" Content="Otevřít soubor…"/>
-            <Button x:Name="BtnSave" Style="{StaticResource BtnPrimary}" Content="Uložit"/>
-            <Button x:Name="BtnSaveAs" Style="{StaticResource Btn}" Content="Uložit jako…"/>
-          </StackPanel>
+          <Grid Grid.Row="4" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Button x:Name="BtnSave" Grid.ColumnSpan="2" Style="{StaticResource BtnPrimary}" Content="Uložit" Margin="0,0,0,8"/>
+            <Button x:Name="BtnOpen" Grid.Row="1" Style="{StaticResource Btn}" Content="Otevřít…" Margin="0,0,4,0" ToolTip="Otevřít soubor s poznámkami"/>
+            <Button x:Name="BtnSaveAs" Grid.Row="1" Grid.Column="1" Style="{StaticResource Btn}" Content="Uložit jako…" Margin="4,0,0,0"/>
+          </Grid>
         </Grid>
       </Border>
     </Grid>
   </DockPanel>
+
+  <!-- Načítání: točící se kolečko přes celé okno -->
+  <Grid x:Name="BusyOverlay" Visibility="Collapsed" Background="#B3F1F5F9" Cursor="Wait">
+    <Grid Width="56" Height="56">
+      <Ellipse Stroke="#D5E7EC" StrokeThickness="6"/>
+      <Ellipse Stroke="{StaticResource Accent}" StrokeThickness="6" StrokeDashArray="9 30" StrokeDashCap="Round" RenderTransformOrigin="0.5,0.5">
+        <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
+        <Ellipse.Triggers>
+          <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                 From="0" To="360" Duration="0:0:0.9" RepeatBehavior="Forever"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </EventTrigger>
+        </Ellipse.Triggers>
+      </Ellipse>
+    </Grid>
+  </Grid>
+  </Grid>
 </Window>
 '@
 
 $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
 foreach ($n in @('ChkCtrl','PosText','InputBox','ItemsList','BtnLoad','BtnClear','CountText',
-                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnMap','BtnExcel','RevisionText',
+                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnMap','BtnExcel','RevisionText','BusyOverlay',
                  'FileNameBox','NotesCaption','NotesBox','BtnOpen','BtnSave','BtnSaveAs')) {
     Set-Variable -Name $n -Value $win.FindName($n) -Scope Script
 }
@@ -833,15 +896,19 @@ function Remove-NoteLine([string]$line) {
     return $false
 }
 
-# Filtr složky (stanice / délka); 'Vše' = bez omezení
+# Filtr složky: množiny vyloučených hodnot stanice (S) a délky (L); prázdná množina = Vše
+$script:EmptyLabel = '(prázdné)'
 function Get-GroupFilter([string]$cat) {
-    if (-not $script:GroupFilter.ContainsKey($cat)) { $script:GroupFilter[$cat] = @{ S = $script:All; L = $script:All } }
+    if (-not $script:GroupFilter.ContainsKey($cat)) {
+        $script:GroupFilter[$cat] = @{ S = (New-Object 'System.Collections.Generic.HashSet[string]'); L = (New-Object 'System.Collections.Generic.HashSet[string]') }
+    }
     $script:GroupFilter[$cat]
 }
+function Get-OptText([string]$v) { if ($v -eq '') { $script:EmptyLabel } else { $v } }
 # Je záznam vidět (prochází filtrem své složky)?
 function Test-Visible($it) {
     $f = Get-GroupFilter $it.Category
-    ($f.S -eq $script:All -or $it.Station -eq $f.S) -and ($f.L -eq $script:All -or $it.Length -eq $f.L)
+    (-not $f.S.Contains((Get-OptText $it.Station))) -and (-not $f.L.Contains((Get-OptText $it.Length)))
 }
 # Indexy viditelných záznamů v pořadí seznamu
 function Get-VisibleIndexes {
@@ -849,19 +916,141 @@ function Get-VisibleIndexes {
     for ($i = 0; $i -lt $script:Items.Count; $i++) { if (Test-Visible $script:Items[$i]) { $v.Add($i) } }
     return ,$v
 }
+# Hodnoty pro výběr: čísla (např. délka) podle hodnoty, text abecedně
 function Get-Choices($items, [string]$prop) {
-    # čísla (např. délka) se řadí podle hodnoty, text abecedně
-    $vals = @($items | ForEach-Object { [string]$_.$prop } | Where-Object { $_ -ne '' } | Select-Object -Unique |
-              Sort-Object { $d = 0.0; if ([double]::TryParse(($_ -replace ',', '.'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { $d } else { [double]::MaxValue } }, { $_ })
-    return ,(@($script:All) + $vals)
+    $vals = @($items | ForEach-Object { Get-OptText ([string]$_.$prop) } | Select-Object -Unique |
+              Sort-Object { $_ -eq $script:EmptyLabel }, { $d = 0.0; if ([double]::TryParse(($_ -replace ',', '.'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { $d } else { [double]::MaxValue } }, { $_ })
+    return ,$vals
 }
 
-# Seznam místo vstupního pole (bez seznamu se zobrazí vstupní pole).
-# Zobrazují se složky (záhlaví s výběrem stanice a délky) a pod nimi jejich viditelné záznamy.
-$script:RowOfItem = @{}   # index záznamu -> index řádku v zobrazeném seznamu
+# ---------- Seznam se složkami ----------
+# Řádky seznamu se drží v ObservableCollection a mění se jen to, co se změnilo (plynulé posouvání).
+$script:Rows = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]'
+$script:Headers = @{}        # složka -> řádek záhlaví (KcRow)
+$script:RowOf = @{}          # index záznamu -> zobrazený řádek (KcRow)
+$script:GroupRange = [ordered]@{}   # složka -> @(první index, poslední index)
+
+function Get-FilterLabel($opts) {
+    $checked = @($opts | Where-Object { -not $_.IsAll -and $_.Checked })
+    $total = @($opts | Where-Object { -not $_.IsAll }).Count
+    if ($checked.Count -eq $total) { return $script:All }
+    if ($checked.Count -eq 0) { return 'Nic' }
+    if ($checked.Count -eq 1) { return $checked[0].Text }
+    return "Vybráno $($checked.Count)"
+}
+
+function New-Options([string]$cat, [string]$kind, $groupItems) {
+    $f = Get-GroupFilter $cat
+    $excl = $f[$kind]
+    $prop = if ($kind -eq 'S') { 'Station' } else { 'Length' }
+    $list = New-Object 'System.Collections.ObjectModel.ObservableCollection[object]'
+    $all = New-Object KcOption
+    $all.Text = $script:All; $all.Kind = $kind; $all.Category = $cat; $all.IsAll = $true; $all.Checked = ($excl.Count -eq 0)
+    $list.Add($all)
+    foreach ($v in (Get-Choices $groupItems $prop)) {
+        $o = New-Object KcOption
+        $o.Text = $v; $o.Kind = $kind; $o.Category = $cat; $o.Checked = -not $excl.Contains($v)
+        $list.Add($o)
+    }
+    foreach ($o in $list) {
+        $o.Add_PropertyChanged({ param($s, $e)
+            if ($e.PropertyName -eq 'Checked' -and -not $script:Syncing) { Invoke-Safe { Set-FilterOption $s } 'Filtr se nepodařilo použít.' }
+        })
+    }
+    return ,$list
+}
+
+# Zaškrtnutí / odškrtnutí hodnoty ve výběru stanice nebo délky
+function Set-FilterOption($opt) {
+    $h = $script:Headers[$opt.Category]
+    $opts = if ($opt.Kind -eq 'S') { $h.SOptions } else { $h.LOptions }
+    $script:Syncing = $true
+    try {
+        if ($opt.IsAll) { foreach ($o in $opts) { if (-not $o.IsAll) { $o.Checked = $opt.Checked } } }
+        else { $opts[0].Checked = (@($opts | Where-Object { -not $_.IsAll -and -not $_.Checked }).Count -eq 0) }
+    } finally { $script:Syncing = $false }
+    $set = (Get-GroupFilter $opt.Category)[$opt.Kind]
+    $set.Clear()
+    foreach ($o in $opts) { if (-not $o.IsAll -and -not $o.Checked) { [void]$set.Add($o.Text) } }
+    Update-Group $opt.Category
+    # aktuální řádek se schoval (nebo bylo hotovo): přejít na další viditelný nerozhodnutý
+    if ($script:Done -or -not (Test-Visible $script:Items[$script:Index])) { Move-NextUndecided $false }
+    else { Update-View }
+}
+
+# Aktualizuje záhlaví složky (šipka, výběry, stav hotovo x / y)
+function Update-Header([string]$cat) {
+    $h = $script:Headers[$cat]
+    if ($null -eq $h) { return }
+    $r = $script:GroupRange[$cat]
+    $vis = 0; $done = 0
+    for ($k = $r[0]; $k -le $r[1]; $k++) {
+        $it = $script:Items[$k]
+        if (Test-Visible $it) { $vis++; if ($it.Status -eq 'keep' -or $it.Status -eq 'del') { $done++ } }
+    }
+    $h.Arrow = if ($script:Collapsed.ContainsKey($cat)) { '▸' } else { '▾' }
+    $h.Progress = "$done / $vis"
+    $h.SLabel = Get-FilterLabel $h.SOptions
+    $h.LLabel = Get-FilterLabel $h.LOptions
+}
+
+# Znovu vyplní řádky jedné složky (po sbalení / rozbalení nebo změně filtru); záhlaví zůstává
+function Update-Group([string]$cat) {
+    $h = $script:Headers[$cat]
+    $pos = $script:Rows.IndexOf($h)
+    $script:Syncing = $true
+    try {
+        while ($pos + 1 -lt $script:Rows.Count -and $script:Rows[$pos + 1].Kind -eq 'I' -and $script:Rows[$pos + 1].Category -eq $cat) {
+            $script:Rows.RemoveAt($pos + 1)
+        }
+        $r = $script:GroupRange[$cat]
+        for ($k = $r[0]; $k -le $r[1]; $k++) { $script:RowOf.Remove($k) }
+        if (-not $script:Collapsed.ContainsKey($cat)) {
+            $at = $pos + 1
+            for ($k = $r[0]; $k -le $r[1]; $k++) {
+                $it = $script:Items[$k]
+                if (-not (Test-Visible $it)) { continue }
+                $row = New-Object KcRow
+                $row.Kind = 'I'; $row.Category = $cat; $row.Num = [string]($k + 1); $row.Value = $it.Value; $row.Note = $it.Note
+                $row.Status = $it.Status; $row.Manual = [bool]$it.Manual; $row.Index = $k
+                $script:Rows.Insert($at, $row); $at++
+                $script:RowOf[$k] = $row
+            }
+        }
+    } finally { $script:Syncing = $false }
+    Update-Header $cat
+}
+
+# Postaví celý seznam znovu (po načtení dat)
+function Build-List {
+    $script:Syncing = $true
+    try {
+        $script:Rows.Clear(); $script:Headers = @{}; $script:RowOf = @{}; $script:GroupRange = [ordered]@{}
+        $i = 0
+        while ($i -lt $script:Items.Count) {
+            $cat = $script:Items[$i].Category
+            $j = $i
+            while ($j -lt $script:Items.Count -and $script:Items[$j].Category -eq $cat) { $script:Items[$j].Num = $j + 1; $j++ }
+            $script:GroupRange[$cat] = @($i, ($j - 1))
+            $groupItems = @($script:Items[$i..($j - 1)])
+            $h = New-Object KcRow
+            $h.Kind = 'H'; $h.Category = $cat; $h.Title = $(if ($cat -eq '') { '(bez složky)' } else { $cat })
+            $h.SOptions = New-Options $cat 'S' $groupItems
+            $h.LOptions = New-Options $cat 'L' $groupItems
+            $script:Headers[$cat] = $h
+            $script:Rows.Add($h)
+            $i = $j
+        }
+    } finally { $script:Syncing = $false }
+    foreach ($cat in @($script:GroupRange.Keys)) { Update-Group $cat }
+    $ItemsList.ItemsSource = $script:Rows
+}
+
+# Zvýrazní aktuální řádek v seznamu (bez přestavění seznamu)
 function Update-ListBox {
     if ($script:Items.Count -eq 0) {
         $ItemsList.ItemsSource = $null
+        $script:Rows.Clear()
         $ItemsList.Visibility = 'Collapsed'
         $RevisionText.Visibility = 'Collapsed'
         $InputBox.Visibility = 'Visible'
@@ -869,45 +1058,10 @@ function Update-ListBox {
     }
     $script:Syncing = $true
     try {
-        # složka aktuálního záznamu musí být rozbalená, aby byl vidět
-        if (-not $script:Done -and $script:Index -lt $script:Items.Count) { $script:Collapsed.Remove($script:Items[$script:Index].Category) }
-        $rows = New-Object System.Collections.Generic.List[object]
-        $script:RowOfItem = @{}
-        $i = 0
-        while ($i -lt $script:Items.Count) {
-            $cat = $script:Items[$i].Category
-            $j = $i
-            while ($j -lt $script:Items.Count -and $script:Items[$j].Category -eq $cat) { $j++ }
-            $groupItems = @($script:Items[$i..($j - 1)])
-            $f = Get-GroupFilter $cat
-            $visible = @(); $done = 0
-            for ($k = $i; $k -lt $j; $k++) {
-                if (Test-Visible $script:Items[$k]) {
-                    $visible += $k
-                    if ($script:Items[$k].Status -eq 'keep' -or $script:Items[$k].Status -eq 'del') { $done++ }
-                }
-            }
-            $collapsed = $script:Collapsed.ContainsKey($cat)
-            $title = if ($cat -eq '') { '(bez složky)' } else { $cat }
-            $rows.Add([pscustomobject]@{ Kind = 'H'; Category = $cat; Title = $title; Arrow = $(if ($collapsed) { '▸' } else { '▾' });
-                                         Progress = "$done / $($visible.Count)"; Num = ''; Value = ''; Note = ''; Status = ''; Manual = $false
-                                         Stations = (Get-Choices $groupItems 'Station'); Lengths = (Get-Choices $groupItems 'Length'); SelS = $f.S; SelL = $f.L })
-            if (-not $collapsed) {
-                foreach ($k in $visible) {
-                    $it = $script:Items[$k]
-                    $it.Num = $k + 1
-                    $script:RowOfItem[$k] = $rows.Count
-                    $rows.Add([pscustomobject]@{ Kind = 'I'; Category = $cat; Title = ''; Arrow = ''; Progress = '';
-                                                 Num = $k + 1; Value = $it.Value; Note = $it.Note; Status = $it.Status; Manual = $it.Manual; Index = $k })
-                }
-            }
-            $i = $j
-        }
-        $ItemsList.ItemsSource = $rows
-        if (-not $script:Done -and $script:RowOfItem.ContainsKey($script:Index)) {
-            $r = $script:RowOfItem[$script:Index]
-            $ItemsList.SelectedIndex = $r
-            $ItemsList.ScrollIntoView($rows[$r])
+        if (-not $script:Done -and $script:RowOf.ContainsKey($script:Index)) {
+            $row = $script:RowOf[$script:Index]
+            $ItemsList.SelectedItem = $row
+            $ItemsList.ScrollIntoView($row)
         } else {
             $ItemsList.SelectedIndex = -1
         }
@@ -952,8 +1106,13 @@ function Update-View {
     Update-ListBox
 }
 
-# Zobrazí aktuální řádek a zkopíruje jeho první hodnotu do schránky
-function Show-Current {
+# Zobrazí aktuální řádek a zkopíruje jeho první hodnotu do schránky.
+# $expand: rozbalí složku aktuálního řádku (při procházení), po načtení zůstávají složky sbalené
+function Show-Current([bool]$expand = $true) {
+    if ($expand -and -not $script:Done -and $script:Index -lt $script:Items.Count) {
+        $cat = $script:Items[$script:Index].Category
+        if ($script:Collapsed.ContainsKey($cat)) { $script:Collapsed.Remove($cat); Update-Group $cat }
+    }
     Update-View
     if (-not $script:Done -and $script:Index -lt $script:Items.Count -and (Test-Visible $script:Items[$script:Index])) {
         if (-not (Set-ClipboardText $script:Items[$script:Index].Value)) {
@@ -964,7 +1123,7 @@ function Show-Current {
 
 # Přejde na další nerozhodnutý řádek (hledá od aktuálního dál, pak od začátku).
 # Až nezbývá žádný nerozhodnutý, přijdou na řadu řádky označené „?“; když nejsou ani ty, dokončeno.
-function Move-NextUndecided {
+function Move-NextUndecided([bool]$expand = $true) {
     $count = $script:Items.Count
     foreach ($wanted in @('', 'unsure')) {
         for ($k = 1; $k -le $count; $k++) {
@@ -972,13 +1131,13 @@ function Move-NextUndecided {
             if ($script:Items[$i].Status -eq $wanted -and (Test-Visible $script:Items[$i])) {
                 $script:Index = $i
                 $script:Done = $false
-                Show-Current
+                Show-Current $expand
                 return
             }
         }
     }
     $script:Done = $true
-    Show-Current
+    Show-Current $false
 }
 
 # Ruční posun o $delta viditelných řádků
@@ -1012,6 +1171,8 @@ function Set-Decision([string]$status) {
         }
     }
     $item.Status = $status
+    if ($script:RowOf.ContainsKey($script:Index)) { $script:RowOf[$script:Index].Status = $status }
+    Update-Header $item.Category
     Move-NextUndecided
 }
 
@@ -1112,19 +1273,55 @@ function Start-List($parsed) {
     if ($parsed.Items.Count -eq 0) { Show-Error 'Nebyl nalezen žádný záznam.'; return }
     $script:Items = Group-Items $parsed.Items
     $script:Revision = [string]$parsed.Revision
-    $script:Collapsed = @{}
     $script:GroupFilter = @{}
+    # po načtení jsou všechny složky sbalené
+    $script:Collapsed = @{}
+    foreach ($it in $script:Items) { $script:Collapsed[$it.Category] = $true }
     $script:Index = 0
     $script:Done = $false
-    Show-Current
+    Build-List
+    Show-Current $false
+}
+
+# Načtení z Excelu běží na pozadí, aby se mezitím točilo kolečko a okno nezamrzlo
+$script:ExcelJob = $null
+function Start-ExcelJob {
+    $names = 'New-Item2', 'Get-RowFields', 'New-ItemFromFields', 'ConvertFrom-FieldRows', 'ConvertTo-CellText', 'Read-FromExcel'
+    $defs = ($names | ForEach-Object { "function $_ {`n$((Get-Item "function:$_").Definition)`n}" }) -join "`n"
+    $vars = @('ColRevision', 'ColCategory', 'ColStation', 'ColLength', 'ColValue', 'ColMap', 'ColNote', 'ExcelBook', 'ExcelSheet') |
+            ForEach-Object { "`$script:$_ = '" + ([string](Get-Variable -Name $_ -Scope Script -ValueOnly)).Replace("'", "''") + "'" }
+    $code = ($vars -join "`n") + "`n" + $defs + "`nRead-FromExcel"
+    $ps = [PowerShell]::Create()
+    [void]$ps.AddScript($code)
+    $script:ExcelJob = @{ PS = $ps; Handle = $ps.BeginInvoke() }
+    $BusyOverlay.Visibility = 'Visible'
+    $t = New-Object System.Windows.Threading.DispatcherTimer
+    $t.Interval = [TimeSpan]::FromMilliseconds(100)
+    $t.Add_Tick({ param($s, $e)
+        $job = $script:ExcelJob
+        if ($null -eq $job -or -not $job.Handle.IsCompleted) { return }
+        $s.Stop()
+        $script:ExcelJob = $null
+        $BusyOverlay.Visibility = 'Collapsed'
+        Invoke-Safe {
+            $parsed = $null
+            try { $out = $job.PS.EndInvoke($job.Handle); if ($out.Count -gt 0) { $parsed = $out[$out.Count - 1] } } catch { }
+            $job.PS.Dispose()
+            if ($null -eq $parsed -or $parsed -isnot [hashtable]) {
+                Show-Error 'Data z Excelu se nepodařilo načíst. Zkontrolujte, že je soubor otevřený a data jsou načtená.'
+                return
+            }
+            if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
+            Start-List $parsed
+        } 'Data z Excelu se nepodařilo načíst.'
+    })
+    $t.Start()
 }
 
 $BtnExcel.Add_Click({ Invoke-Safe {
+    if ($null -ne $script:ExcelJob) { return }
     if ($script:Items.Count -gt 0 -and -not (Ask-YesNo ('Seznam už je vytvořený. Nahradit ho daty z Excelu?' + "`n`n" + 'Poznámky zůstanou beze změny.') 'Načíst z Excelu')) { return }
-    $win.Cursor = [System.Windows.Input.Cursors]::Wait
-    try { $parsed = Read-FromExcel } finally { $win.Cursor = $null }
-    if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
-    Start-List $parsed
+    Start-ExcelJob
 } 'Data z Excelu se nepodařilo načíst. Zkontrolujte, že je soubor otevřený a data jsou načtená.' })
 
 $BtnLoad.Add_Click({ Invoke-Safe {
@@ -1152,10 +1349,9 @@ $ItemsList.Add_SelectionChanged({ param($s, $e)
         $row = $ItemsList.SelectedItem
         if ($null -eq $row) { return }
         if ($row.Kind -eq 'H') {
-            if ($script:Collapsed.ContainsKey($row.Category)) { $script:Collapsed.Remove($row.Category) }
-            elseif (-not $script:Done -and $script:Items[$script:Index].Category -eq $row.Category) {
-                Show-Info 'Složku s aktuálním řádkem nejde sbalit. Nejdřív přejděte na řádek v jiné složce.'
-            } else { $script:Collapsed[$row.Category] = $true }
+            if ($script:Collapsed.ContainsKey($row.Category)) { [void]$script:Collapsed.Remove($row.Category) }
+            else { $script:Collapsed[$row.Category] = $true }
+            Update-Group $row.Category
             Update-ListBox
             return
         }
@@ -1167,31 +1363,9 @@ $ItemsList.Add_SelectionChanged({ param($s, $e)
     } 'Přechod na řádek se nezdařil.'
 })
 
-# Výběr stanice / délky v záhlaví složky: ostatní záznamy složky se schovají
-$ItemsList.AddHandler([System.Windows.Controls.Primitives.Selector]::SelectionChangedEvent,
-    [System.Windows.Controls.SelectionChangedEventHandler]{
-        param($s, $e)
-        $cb = $e.OriginalSource
-        if ($cb -isnot [System.Windows.Controls.ComboBox]) { return }
-        $e.Handled = $true
-        if ($script:Syncing -or $null -eq $cb.SelectedItem) { return }
-        $row = $cb.DataContext
-        if ($null -eq $row -or $row.Kind -ne 'H') { return }
-        $f = Get-GroupFilter $row.Category
-        $val = [string]$cb.SelectedItem
-        if ($f[$cb.Tag] -eq $val) { return }   # stejná hodnota (např. při vykreslení)
-        $f[$cb.Tag] = $val
-        # seznam se přestaví až po dokončení této události
-        [void]$win.Dispatcher.BeginInvoke([Action]{ Invoke-Safe {
-            # aktuální řádek se schoval (nebo bylo hotovo): přejít na další viditelný nerozhodnutý
-            if ($script:Done -or -not (Test-Visible $script:Items[$script:Index])) { Move-NextUndecided }
-            else { Update-View }
-        } 'Filtr se nepodařilo použít.' })
-    })
-
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
 $ItemsList.Add_PreviewKeyDown({ param($s, $e)
-    if ($e.OriginalSource -is [System.Windows.Controls.ComboBox] -or $e.OriginalSource -is [System.Windows.Controls.ComboBoxItem]) { return }
+    if ($e.OriginalSource -is [System.Windows.Controls.Primitives.ToggleButton]) { return }
     $d = switch ($e.Key) { 'Up' { -1 } 'Down' { 1 } 'PageUp' { -10 } 'PageDown' { 10 } default { 0 } }
     if ($d -ne 0) {
         $e.Handled = $true
