@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '29'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '30'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -791,10 +791,13 @@ function Update-Shortcuts {
               </ListBox.ItemTemplate>
             </ListBox>
             <!-- záhlaví složky připíchnuté nahoře při posouvání seznamu -->
-            <Border x:Name="StickyHeader" Grid.Row="1" VerticalAlignment="Top" Visibility="Collapsed" Margin="1,1,18,0"
-                    Background="#F8FAFC" Padding="4,0,8,4">
-              <ContentControl x:Name="StickyContent" ContentTemplate="{StaticResource HeaderTpl}"/>
-            </Border>
+            <!-- (vrstva bez pozadí: kliknutí mimo připíchnuté záhlaví jdou do seznamu; ořez, aby záhlaví při odsouvání nevyjelo nad seznam) -->
+            <Grid Grid.Row="1" ClipToBounds="True" Margin="1,1,18,0">
+              <Border x:Name="StickyHeader" VerticalAlignment="Top" Visibility="Collapsed" Background="#F8FAFC" Padding="4,0,8,4">
+                <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+                <ContentControl x:Name="StickyContent" ContentTemplate="{StaticResource HeaderTpl}"/>
+              </Border>
+            </Grid>
             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
               <Button x:Name="BtnExcel" Style="{StaticResource BtnPrimary}" Content="Načíst z Excelu"/>
               <Button x:Name="BtnLoad" Style="{StaticResource Btn}" Content="Vytvořit seznam" ToolTip="Vytvoří seznam z řádků vložených do pole přes Ctrl+V"/>
@@ -1066,6 +1069,7 @@ function Update-ListBox([bool]$scroll = $false) {
         $script:Rows.Clear()
         $ItemsList.Visibility = 'Collapsed'
         $StickyHeader.Visibility = 'Collapsed'
+        $StickyHeader.RenderTransform.Y = 0
         $RevisionText.Visibility = 'Collapsed'
         $InputBox.Visibility = 'Visible'
         return
@@ -1377,23 +1381,45 @@ $ItemsList.Add_SelectionChanged({ param($s, $e)
     } 'Přechod na řádek se nezdařil.'
 })
 
-# Připíchnuté záhlaví: při posouvání ukazuje záhlaví složky, jejíž řádky jsou právě nahoře
+# Řádek seznamu (kontejner) na dané výšce od horního okraje seznamu
+function Get-RowContainerAt([double]$y) {
+    $hit = $ItemsList.InputHitTest((New-Object System.Windows.Point(40, $y)))
+    if ($hit -isnot [System.Windows.DependencyObject]) { return $null }
+    $c = [System.Windows.Controls.ItemsControl]::ContainerFromElement($ItemsList, $hit)
+    if ($null -eq $c -or $null -eq $c.DataContext) { return $null }
+    return $c
+}
+
+# Připíchnuté záhlaví: při posouvání ukazuje záhlaví rozbalené složky, jejíž řádky jsou právě nahoře.
+# Sbalené složky připíchnuté záhlaví nemají (nemají pod sebou řádky). Když se zespodu přiblíží
+# záhlaví další složky, připíchnuté se plynule odsune nahoru, aby se nepřekrývala.
 function Update-Sticky {
-    if ($ItemsList.Visibility -ne 'Visible' -or $script:Rows.Count -eq 0) { $StickyHeader.Visibility = 'Collapsed'; return }
-    $hit = $ItemsList.InputHitTest((New-Object System.Windows.Point(40, 6)))
-    $c = $null
-    if ($hit -is [System.Windows.DependencyObject]) { $c = [System.Windows.Controls.ItemsControl]::ContainerFromElement($ItemsList, $hit) }
-    if ($null -eq $c -or $null -eq $c.DataContext) { $StickyHeader.Visibility = 'Collapsed'; return }
+    $hide = { $StickyHeader.Visibility = 'Collapsed'; $StickyHeader.RenderTransform.Y = 0 }
+    if ($ItemsList.Visibility -ne 'Visible' -or $script:Rows.Count -eq 0) { & $hide; return }
+    $c = Get-RowContainerAt 6
+    if ($null -eq $c) { & $hide; return }
     $row = $c.DataContext
+    $cat = $row.Category
+    if ($script:Collapsed.ContainsKey($cat)) { & $hide; return }
     if ($row.Kind -eq 'H') {
         # skutečné záhlaví je celé vidět nahoře: připíchnuté není potřeba
         $top = $c.TranslatePoint((New-Object System.Windows.Point(0, 0)), $ItemsList).Y
-        if ($top -ge -2) { $StickyHeader.Visibility = 'Collapsed'; return }
+        if ($top -ge -2) { & $hide; return }
     }
-    $h = $script:Headers[$row.Category]
-    if ($null -eq $h) { $StickyHeader.Visibility = 'Collapsed'; return }
+    $h = $script:Headers[$cat]
+    if ($null -eq $h) { & $hide; return }
     if (-not [object]::ReferenceEquals($StickyContent.Content, $h)) { $StickyContent.Content = $h }
     $StickyHeader.Visibility = 'Visible'
+    # odsunutí: záhlaví další složky těsně pod připíchnutým
+    $sh = $StickyHeader.ActualHeight
+    if ($sh -le 0) { $sh = 48 }
+    $shift = 0
+    $c2 = Get-RowContainerAt ($sh + 2)
+    if ($null -ne $c2 -and $c2.DataContext.Kind -eq 'H' -and $c2.DataContext.Category -ne $cat) {
+        $top2 = $c2.TranslatePoint((New-Object System.Windows.Point(0, 0)), $ItemsList).Y + 4
+        $shift = [Math]::Min(0, $top2 - $sh)
+    }
+    $StickyHeader.RenderTransform.Y = $shift
 }
 $ItemsList.AddHandler([System.Windows.Controls.ScrollViewer]::ScrollChangedEvent,
     [System.Windows.Controls.ScrollChangedEventHandler]{ param($s, $e) try { Update-Sticky } catch { } })
@@ -1406,6 +1432,7 @@ $StickyHeader.Add_MouseLeftButtonUp({ param($s, $e) Invoke-Safe {
     if ($script:Collapsed.ContainsKey($cat)) { [void]$script:Collapsed.Remove($cat) } else { $script:Collapsed[$cat] = $true }
     Update-Group $cat
     $ItemsList.ScrollIntoView($h)
+    $StickyHeader.Visibility = 'Collapsed'
 } 'Složku se nepodařilo sbalit.' })
 
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
