@@ -26,7 +26,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - **3.** složka (datum RRMMDD),
    - **9.** stanice a **10.** délka (výběry v záhlaví složky),
    - **12.** údaj k ověření,
-   - **16.** odkaz na mapu (dmwmap://…),
+   - **16.** odkaz na fotku (dmwmap://…),
    - **36.** poznámka při Vymazat.
 
    Záloha: řádky lze také zkopírovat z Excelu, vložit do pole (Ctrl+V) a kliknout na **Vytvořit seznam**.
@@ -34,8 +34,9 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 4. Aktuální hodnota se zobrazí velkým písmem a je vždy zkopírovaná ve schránce. Značky v seznamu: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později.
    - **Ponechat** označí řádek ✓, **Vymazat** zapíše poznámku a označí řádek ✗, **? Vrátit se později** označí řádek ?.
    - Po rozhodnutí se přejde na další nerozhodnutý zobrazený řádek.
+   - Při posouvání seznamu zůstává záhlaví aktuálně zobrazené složky (s filtry) připíchnuté nahoře.
    - Šipkami **▲ ▼**, kliknutím na řádek nebo klávesami ↑ ↓ se můžete posouvat ručně a rozhodnutí změnit.
-   - **Zobrazit na mapě** otevře odkaz aktuálního záznamu.
+   - **Zobrazit fotku** otevře odkaz aktuálního záznamu.
 5. **Vkládání do jiné aplikace:** dokud aplikace běží, **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem nahoře.
 6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
 7. Ukládání poznámek (vždy UTF-8 `.txt`):
