@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '22'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '24'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -159,14 +159,20 @@ $script:Syncing = $false       # programové nastavení výběru v seznamu (neř
 $script:Done = $false          # všechny řádky rozhodnuty a zobrazuje se dokončení
 $script:PastedCols = 0         # kolik sloupců mělo poslední vložení (před ořezáním)
 $script:Collapsed = @{}         # složky (kategorie), které jsou sbalené
+$script:GroupFilter = @{}       # filtr v každé složce: @{ S = stanice; L = délka } ('Vše' = bez filtru)
+$script:Revision = ''           # číslo revize z 1. sloupce
+$script:All = 'Vše'
 $script:NotesFile = $null      # soubor, do kterého se poznámky ukládají (po Otevřít / Uložit jako)
 $script:MyPath = $MyInvocation.MyCommand.Path
 $win = $null
 
 # Status: '' = nerozhodnuto, 'keep' = Ponechat, 'del' = Vymazat (poznámka zapsána), 'unsure' = vrátit se později
-# Category = složka podle 1. sloupce; Manual = záznam přidaný přes Vložit mezi; Num = pořadové číslo (pro zobrazení)
-function New-Item2([string]$value, [string]$note, [bool]$manual = $false, [string]$category = '') {
-    [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual; Num = 0; Category = $category }
+# Category = složka (3. sloupec), Station = stanice (9.), Length = délka (10.), MapUrl = odkaz na mapu (16.)
+# Manual = záznam přidaný ručně; Num = pořadové číslo (pro zobrazení)
+function New-Item2([string]$value, [string]$note, [bool]$manual = $false, [string]$category = '',
+                   [string]$station = '', [string]$length = '', [string]$mapUrl = '') {
+    [pscustomobject]@{ Value = $value; Note = $note; Status = ''; Manual = $manual; Num = 0; Category = $category
+                       Station = $station; Length = $length; MapUrl = $mapUrl }
 }
 
 function Show-Msg([string]$text, [string]$icon) {
@@ -202,13 +208,35 @@ function Get-ColumnLines([string]$text) {
     return ,$lines.ToArray()
 }
 
-# Sloupce z Excelu, se kterými aplikace pracuje (číslováno od 1)
-$script:ColCategory = 1     # složka (kategorie)
-$script:ColValue    = 10    # Údaj k ověření
-# poznámka při Vymazat = poslední sloupec
+# Sloupce z Excelu (list ZJISTENI, 37 sloupců), se kterými aplikace pracuje - číslováno od 1
+$script:ColRevision = 1     # číslo revize (stejné pro celé načtení)
+$script:ColCategory = 3     # složka (datum RRMMDD)
+$script:ColStation  = 9     # stanice (filtr)
+$script:ColLength   = 10    # délka (filtr)
+$script:ColValue    = 12    # Údaj k ověření
+$script:ColMap      = 16    # odkaz na mapu (dmwmap://…)
+$script:ColNote     = 36    # poznámka při Vymazat
+$script:ExcelBook   = '_kontrola_clearance_v4'
+$script:ExcelSheet  = 'ZJISTENI'
 
-# Ze vloženého textu ponechá v každém řádku jen 3 sloupce: složka, údaj, poznámka (1., 10. a poslední).
-# Ostatní sloupce zahodí hned při vložení. Vrací @{ Text; Columns } nebo @{ Error }.
+# Z celého řádku (pole hodnot, index od 0) vybere potřebné údaje.
+# Vrací $null pro prázdný řádek, jinak @{ Error } nebo @{ Fields = revize, složka, stanice, délka, údaj, mapa, poznámka }.
+function Get-RowFields([string[]]$parts, [int]$rowNo) {
+    if ([string]::IsNullOrWhiteSpace(($parts -join ''))) { return $null }
+    if ($parts.Count -lt $script:ColNote) {
+        return @{ Error = "Řádek $rowNo má jen $($parts.Count) sloupců, aplikace potřebuje aspoň $($script:ColNote). Nic nebylo načteno." }
+    }
+    $f = @($script:ColRevision, $script:ColCategory, $script:ColStation, $script:ColLength, $script:ColValue, $script:ColMap, $script:ColNote) |
+         ForEach-Object { ([string]$parts[$_ - 1]).Replace("`t", ' ').Trim() }
+    return @{ Fields = $f }
+}
+
+function New-ItemFromFields($f, [bool]$manual = $false) {
+    New-Item2 $f[4] $f[6] $manual $f[1] $f[2] $f[3] $f[5]
+}
+
+# Ze vloženého textu (Ctrl+V z Excelu) ponechá v každém řádku jen potřebné sloupce.
+# Vrací @{ Text; Columns } nebo @{ Error }.
 function Reduce-PastedColumns([string]$text) {
     $lines = $text -split "\r\n|\n|\r"
     $columns = 0
@@ -221,40 +249,108 @@ function Reduce-PastedColumns([string]$text) {
         elseif ($parts.Count -ne $columns) {
             return @{ Error = "Řádek $($i + 1) má $($parts.Count) sloupců, ale předchozí řádky mají $columns.`nZkopírujte z Excelu souvislý obdélníkový rozsah. Nic nebylo vloženo." }
         }
-        if ($parts.Count -lt $script:ColValue) {
-            return @{ Error = "Řádek $($i + 1) má jen $($parts.Count) sloupců. Aplikace potřebuje aspoň $($script:ColValue) sloupců (1. = složka, $($script:ColValue). = údaj, poslední = poznámka).`nZkopírujte z Excelu celý rozsah sloupců. Nic nebylo vloženo." }
-        }
-        $out.Add($parts[$script:ColCategory - 1].Trim() + "`t" + $parts[$script:ColValue - 1] + "`t" + $parts[$parts.Count - 1])
+        $r = Get-RowFields $parts ($i + 1)
+        if ($r.Error) { return @{ Error = $r.Error } }
+        $out.Add($r.Fields -join "`t")
     }
     while ($out.Count -gt 0 -and $out[$out.Count - 1] -eq '') { $out.RemoveAt($out.Count - 1) }
     return @{ Text = (($out -join "`r`n") + "`r`n"); Columns = $columns }
 }
 
-# Z řádků ve tvaru „složka <TAB> údaj <TAB> poznámka“ (po vložení přes Ctrl+V) vytvoří záznamy.
-# Vrací @{ Ok; Items; Error }. Při chybě nevrací žádné položky.
+# Z řádků po vložení přes Ctrl+V (7 vybraných sloupců) vytvoří záznamy.
+# Vrací @{ Ok; Items; Revision; Error }. Při chybě nevrací žádné položky.
 function ConvertFrom-Rows([string]$text, [bool]$manual = $false) {
     $lines = Get-ColumnLines $text
     if ($lines.Count -eq 0) {
-        return @{ Ok = $false; Error = 'Vstup je prázdný. Zkopírujte řádky z Excelu a vložte je do pole (Ctrl+V).' }
+        return @{ Ok = $false; Error = 'Vstup je prázdný. Načtěte data z Excelu nebo je vložte do pole (Ctrl+V).' }
     }
-    $result = New-Object System.Collections.Generic.List[object]
+    $rows = New-Object System.Collections.Generic.List[object]
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $rowNo = $i + 1
-        $line = $lines[$i]
-        if ([string]::IsNullOrWhiteSpace($line.Replace("`t", ''))) { continue }
-        $parts = $line.Split("`t")
-        if ($parts.Count -ne 3) {
-            return @{ Ok = $false; Error = "Řádek $rowNo nemá očekávaný tvar. Zkopírujte řádky z Excelu (všechny sloupce) a vložte je do pole přes Ctrl+V.`nNic nebylo načteno." }
+        if ([string]::IsNullOrWhiteSpace($lines[$i].Replace("`t", ''))) { continue }
+        $parts = $lines[$i].Split("`t")
+        if ($parts.Count -ne 7) {
+            return @{ Ok = $false; Error = "Řádek $($i + 1) nemá očekávaný tvar. Zkopírujte řádky z Excelu (všechny sloupce) a vložte je do pole přes Ctrl+V.`nNic nebylo načteno." }
         }
-        $c = $parts[0].Trim()
-        $v = $parts[1].Trim()
-        $n = $parts[2].Trim()
-        if ($v -eq '') {
-            return @{ Ok = $false; Error = "Řádek $rowNo má prázdný $($script:ColValue). sloupec (Údaj k ověření).`nNic nebylo načteno." }
-        }
-        $result.Add((New-Item2 $v $n $manual $c))
+        $rows.Add(@{ Fields = $parts; RowNo = $i + 1 })
     }
-    return @{ Ok = $true; Items = $result }
+    return (ConvertFrom-FieldRows $rows $manual)
+}
+
+# Společné pro vložení i načtení z Excelu: z vybraných údajů vytvoří záznamy
+function ConvertFrom-FieldRows($rows, [bool]$manual = $false) {
+    $result = New-Object System.Collections.Generic.List[object]
+    $rev = ''
+    foreach ($r in $rows) {
+        $f = $r.Fields
+        if ($f[4] -eq '') {
+            if ($f[1] -eq '') { continue }   # řádek bez údaje i složky (např. prázdný konec tabulky)
+            return @{ Ok = $false; Error = "Řádek $($r.RowNo) má prázdný $($script:ColValue). sloupec (Údaj k ověření).`nNic nebylo načteno." }
+        }
+        if ($rev -eq '') { $rev = $f[0] }
+        $result.Add((New-ItemFromFields $f $manual))
+    }
+    return @{ Ok = $true; Items = $result; Revision = $rev }
+}
+
+# Text z buňky Excelu (čísla bez desetinných míst a bez formátování)
+function ConvertTo-CellText($v) {
+    if ($null -eq $v) { return '' }
+    if ($v -is [double]) {
+        if ([Math]::Floor($v) -eq $v) { return $v.ToString('0', [Globalization.CultureInfo]::InvariantCulture) }
+        return $v.ToString([Globalization.CultureInfo]::CurrentCulture)
+    }
+    return [string]$v
+}
+
+# Načte záznamy přímo z otevřeného Excelu: sešit _kontrola_clearance_v4 (uložený lokálně), list ZJISTENI.
+# 1. řádek listu je záhlaví a přeskočí se. Vrací stejný výsledek jako ConvertFrom-Rows.
+function Read-FromExcel {
+    try { $xl = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') }
+    catch { return @{ Ok = $false; Error = "Excel není spuštěný.`nOtevřete soubor $($script:ExcelBook), načtěte data (makro) a zkuste to znovu." } }
+    $wb = $null
+    foreach ($w in $xl.Workbooks) {
+        $name = [System.IO.Path]::GetFileNameWithoutExtension([string]$w.Name)
+        if ($name -ieq $script:ExcelBook -and ([string]$w.FullName) -notmatch '^https?://') { $wb = $w; break }
+    }
+    if (-not $wb) {
+        return @{ Ok = $false; Error = "V Excelu není otevřený soubor $($script:ExcelBook) uložený v počítači.`n(Online verze se nenačítá.)" }
+    }
+    $ws = $null
+    foreach ($sh in $wb.Worksheets) { if (([string]$sh.Name).Trim() -ieq $script:ExcelSheet) { $ws = $sh; break } }
+    if (-not $ws) { return @{ Ok = $false; Error = "V souboru $($script:ExcelBook) chybí list $($script:ExcelSheet)." } }
+
+    $ur = $ws.UsedRange
+    $vals = $ur.Value2
+    if ($null -eq $vals -or $vals -isnot [array]) { return @{ Ok = $false; Error = "List $($script:ExcelSheet) neobsahuje žádná data." } }
+    $firstRow = [int]$ur.Row; $firstCol = [int]$ur.Column
+    $r0 = $vals.GetLowerBound(0); $r1 = $vals.GetUpperBound(0)
+    $c0 = $vals.GetLowerBound(1); $c1 = $vals.GetUpperBound(1)
+    $lastCol = $firstCol + ($c1 - $c0)
+    $width = [Math]::Max($lastCol, $script:ColNote)
+    if ($lastCol -lt $script:ColNote) {
+        return @{ Ok = $false; Error = "List $($script:ExcelSheet) má jen $lastCol sloupců, aplikace potřebuje aspoň $($script:ColNote)." }
+    }
+    # čtou se jen potřebné sloupce (rychlejší)
+    $need = @($script:ColRevision, $script:ColCategory, $script:ColStation, $script:ColLength, $script:ColValue, $script:ColMap, $script:ColNote)
+    $rows = New-Object System.Collections.Generic.List[object]
+    for ($r = $r0; $r -le $r1; $r++) {
+        $sheetRow = $firstRow + ($r - $r0)
+        if ($sheetRow -le 1) { continue }   # záhlaví
+        $parts = [string[]]::new($width)
+        for ($k = 0; $k -lt $width; $k++) { $parts[$k] = '' }
+        foreach ($col in $need) {
+            $c = $c0 + ($col - $firstCol)
+            if ($c -ge $c0 -and $c -le $c1) { $parts[$col - 1] = ConvertTo-CellText $vals[$r, $c] }
+        }
+        $g = Get-RowFields $parts $sheetRow
+        if ($null -eq $g) { continue }
+        if ($g.Error) { return @{ Ok = $false; Error = $g.Error } }
+        # datum RRMMDD uložené jako číslo ztratí úvodní nulu (např. 050101 -> 50101)
+        if ($g.Fields[1] -match '^\d{5}$') { $g.Fields[1] = '0' + $g.Fields[1] }
+        $rows.Add(@{ Fields = $g.Fields; RowNo = $sheetRow })
+    }
+    if ($rows.Count -eq 0) { return @{ Ok = $false; Error = "List $($script:ExcelSheet) neobsahuje žádné záznamy (pod záhlavím)." } }
+    return (ConvertFrom-FieldRows $rows)
 }
 
 # Klíč pro řazení složek: datum RRMMDD z názvu složky (první šestice číslic). Bez data = $null.
@@ -495,10 +591,10 @@ function Update-Shortcuts {
     </Border>
 
     <Grid Margin="8">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
 
-      <!-- Levá část -->
-      <Grid Grid.Column="0">
+      <!-- Pravá část: vkládání, seznam a ovládání -->
+      <Grid Grid.Column="1">
         <Grid.RowDefinitions>
           <RowDefinition Height="*"/><RowDefinition Height="*"/><RowDefinition Height="88"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -506,10 +602,11 @@ function Update-Shortcuts {
         <!-- Vstup / seznam -->
         <Border Grid.Row="0" Style="{StaticResource Card}">
           <Grid>
-            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <TextBox x:Name="InputBox" Style="{StaticResource Field}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <TextBlock x:Name="RevisionText" Visibility="Collapsed" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Accent}" Margin="2,0,0,8"/>
+            <TextBox x:Name="InputBox" Grid.Row="1" Style="{StaticResource Field}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
                      FontFamily="Consolas" FontSize="13" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
-            <ListBox x:Name="ItemsList" Visibility="Collapsed" BorderThickness="1" BorderBrush="{StaticResource Line}" Background="#F8FAFC"
+            <ListBox x:Name="ItemsList" Grid.Row="1" Visibility="Collapsed" BorderThickness="1" BorderBrush="{StaticResource Line}" Background="#F8FAFC"
                      ItemContainerStyle="{StaticResource Row}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingStackPanel.IsVirtualizing="True">
               <ListBox.ItemTemplate>
@@ -518,10 +615,16 @@ function Update-Shortcuts {
                     <!-- záhlaví složky (kliknutím se rozbalí / sbalí) -->
                     <Border x:Name="HeaderRow" Visibility="Collapsed" Background="#E2E8F0" CornerRadius="6" Padding="8,5" Margin="-8,4,0,2" Cursor="Hand">
                       <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
                         <TextBlock Text="{Binding Arrow}" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Foreground="#0F172A" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="2" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                        <ComboBox Grid.Column="2" Tag="S" Width="160" Margin="8,0,0,0" Cursor="Arrow" ToolTip="Stanice" FontSize="12"
+                                  ItemsSource="{Binding Stations}" SelectedItem="{Binding SelS, Mode=OneWay}"/>
+                        <ComboBox Grid.Column="3" Tag="L" Width="110" Margin="6,0,0,0" Cursor="Arrow" ToolTip="Délka" FontSize="12"
+                                  ItemsSource="{Binding Lengths}" SelectedItem="{Binding SelL, Mode=OneWay}"/>
+                        <TextBlock Grid.Column="4" Text="{Binding Progress}" FontSize="12" Foreground="#475569" VerticalAlignment="Center" Margin="10,0,4,0"/>
                       </Grid>
                     </Border>
                     <!-- řádek záznamu -->
@@ -548,8 +651,9 @@ function Update-Shortcuts {
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
-              <Button x:Name="BtnLoad" Style="{StaticResource BtnPrimary}" Content="Vytvořit seznam"/>
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+              <Button x:Name="BtnExcel" Style="{StaticResource BtnPrimary}" Content="Načíst z Excelu"/>
+              <Button x:Name="BtnLoad" Style="{StaticResource Btn}" Content="Vytvořit seznam" ToolTip="Vytvoří seznam z řádků vložených do pole přes Ctrl+V"/>
               <Button x:Name="BtnClear" Style="{StaticResource Btn}" Content="Zrušit seznam"/>
               <TextBlock x:Name="CountText" Text="Řádků: 0" FontWeight="SemiBold" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
@@ -560,10 +664,11 @@ function Update-Shortcuts {
         <Border Grid.Row="1" Style="{StaticResource Card}">
           <DockPanel>
             <Grid DockPanel.Dock="Top">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <TextBlock Text="AKTUÁLNÍ ÚDAJ  •  zkopírováno do schránky" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
-              <Button x:Name="BtnUp" Grid.Column="1" Style="{StaticResource BtnNav}" Content="▲" ToolTip="Předchozí řádek"/>
-              <Button x:Name="BtnDown" Grid.Column="2" Style="{StaticResource BtnNav}" Content="▼" ToolTip="Další řádek"/>
+              <Button x:Name="BtnMap" Grid.Column="1" Style="{StaticResource Btn}" Content="Zobrazit na mapě" Padding="14,6" Margin="0,0,6,0"/>
+              <Button x:Name="BtnUp" Grid.Column="2" Style="{StaticResource BtnNav}" Content="▲" ToolTip="Předchozí řádek"/>
+              <Button x:Name="BtnDown" Grid.Column="3" Style="{StaticResource BtnNav}" Content="▼" ToolTip="Další řádek"/>
             </Grid>
             <TextBlock x:Name="CurrentNote" DockPanel.Dock="Bottom" TextAlignment="Center" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,6,0,0"/>
             <TextBlock x:Name="CurrentText" FontSize="34" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
@@ -580,13 +685,12 @@ function Update-Shortcuts {
 
         <!-- Vedlejší akce -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,4">
-          <Button x:Name="BtnUnsure" Style="{StaticResource Btn}" Background="White" Foreground="#D97706" Content="?   Vrátit se později"/>
-          <Button x:Name="BtnInsert" Style="{StaticResource Btn}" Background="White" Foreground="{StaticResource Accent}" Content="+   Vložit mezi" Margin="0"/>
+          <Button x:Name="BtnUnsure" Style="{StaticResource Btn}" Background="White" Foreground="#D97706" Content="?   Vrátit se později" Margin="0"/>
         </StackPanel>
       </Grid>
 
-      <!-- Pravá část: poznámky -->
-      <Border Grid.Column="1" Style="{StaticResource Card}">
+      <!-- Levá část: poznámky -->
+      <Border Grid.Column="0" Style="{StaticResource Card}">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
@@ -610,7 +714,7 @@ function Update-Shortcuts {
 
 $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
 foreach ($n in @('ChkCtrl','PosText','InputBox','ItemsList','BtnLoad','BtnClear','CountText',
-                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnInsert',
+                 'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnMap','BtnExcel','RevisionText',
                  'FileNameBox','NotesCaption','NotesBox','BtnOpen','BtnSave','BtnSaveAs')) {
     Set-Variable -Name $n -Value $win.FindName($n) -Scope Script
 }
@@ -642,13 +746,37 @@ function Remove-NoteLine([string]$line) {
     return $false
 }
 
+# Filtr složky (stanice / délka); 'Vše' = bez omezení
+function Get-GroupFilter([string]$cat) {
+    if (-not $script:GroupFilter.ContainsKey($cat)) { $script:GroupFilter[$cat] = @{ S = $script:All; L = $script:All } }
+    $script:GroupFilter[$cat]
+}
+# Je záznam vidět (prochází filtrem své složky)?
+function Test-Visible($it) {
+    $f = Get-GroupFilter $it.Category
+    ($f.S -eq $script:All -or $it.Station -eq $f.S) -and ($f.L -eq $script:All -or $it.Length -eq $f.L)
+}
+# Indexy viditelných záznamů v pořadí seznamu
+function Get-VisibleIndexes {
+    $v = New-Object System.Collections.Generic.List[int]
+    for ($i = 0; $i -lt $script:Items.Count; $i++) { if (Test-Visible $script:Items[$i]) { $v.Add($i) } }
+    return ,$v
+}
+function Get-Choices($items, [string]$prop) {
+    # čísla (např. délka) se řadí podle hodnoty, text abecedně
+    $vals = @($items | ForEach-Object { [string]$_.$prop } | Where-Object { $_ -ne '' } | Select-Object -Unique |
+              Sort-Object { $d = 0.0; if ([double]::TryParse(($_ -replace ',', '.'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { $d } else { [double]::MaxValue } }, { $_ })
+    return ,(@($script:All) + $vals)
+}
+
 # Seznam místo vstupního pole (bez seznamu se zobrazí vstupní pole).
-# Zobrazují se složky (záhlaví) a pod nimi jejich záznamy; sbalené složky záznamy skrývají.
-$script:RowOfItem = @{}   # záznam -> index řádku v zobrazeném seznamu
+# Zobrazují se složky (záhlaví s výběrem stanice a délky) a pod nimi jejich viditelné záznamy.
+$script:RowOfItem = @{}   # index záznamu -> index řádku v zobrazeném seznamu
 function Update-ListBox {
     if ($script:Items.Count -eq 0) {
         $ItemsList.ItemsSource = $null
         $ItemsList.Visibility = 'Collapsed'
+        $RevisionText.Visibility = 'Collapsed'
         $InputBox.Visibility = 'Visible'
         return
     }
@@ -662,17 +790,23 @@ function Update-ListBox {
         while ($i -lt $script:Items.Count) {
             $cat = $script:Items[$i].Category
             $j = $i
-            $done = 0
-            while ($j -lt $script:Items.Count -and $script:Items[$j].Category -eq $cat) {
-                if ($script:Items[$j].Status -eq 'keep' -or $script:Items[$j].Status -eq 'del') { $done++ }
-                $j++
+            while ($j -lt $script:Items.Count -and $script:Items[$j].Category -eq $cat) { $j++ }
+            $groupItems = @($script:Items[$i..($j - 1)])
+            $f = Get-GroupFilter $cat
+            $visible = @(); $done = 0
+            for ($k = $i; $k -lt $j; $k++) {
+                if (Test-Visible $script:Items[$k]) {
+                    $visible += $k
+                    if ($script:Items[$k].Status -eq 'keep' -or $script:Items[$k].Status -eq 'del') { $done++ }
+                }
             }
             $collapsed = $script:Collapsed.ContainsKey($cat)
             $title = if ($cat -eq '') { '(bez složky)' } else { $cat }
             $rows.Add([pscustomobject]@{ Kind = 'H'; Category = $cat; Title = $title; Arrow = $(if ($collapsed) { '▸' } else { '▾' });
-                                         Progress = "$done / $($j - $i)"; Num = ''; Value = ''; Note = ''; Status = ''; Manual = $false })
+                                         Progress = "$done / $($visible.Count)"; Num = ''; Value = ''; Note = ''; Status = ''; Manual = $false
+                                         Stations = (Get-Choices $groupItems 'Station'); Lengths = (Get-Choices $groupItems 'Length'); SelS = $f.S; SelL = $f.L })
             if (-not $collapsed) {
-                for ($k = $i; $k -lt $j; $k++) {
+                foreach ($k in $visible) {
                     $it = $script:Items[$k]
                     $it.Num = $k + 1
                     $script:RowOfItem[$k] = $rows.Count
@@ -690,28 +824,32 @@ function Update-ListBox {
         } else {
             $ItemsList.SelectedIndex = -1
         }
+        $RevisionText.Text = if ($script:Revision -ne '') { "Revize $($script:Revision)" } else { 'Revize –' }
+        $RevisionText.Visibility = 'Visible'
         $InputBox.Visibility = 'Collapsed'
         $ItemsList.Visibility = 'Visible'
     } finally { $script:Syncing = $false }
 }
 
 function Update-View {
+    $vis = Get-VisibleIndexes
     $count = $script:Items.Count
-    $on = ($count -gt 0 -and -not $script:Done)
-    $BtnYes.IsEnabled = $on; $BtnNo.IsEnabled = $on; $BtnUnsure.IsEnabled = $on; $BtnInsert.IsEnabled = $on
-    $BtnUp.IsEnabled = ($count -gt 0); $BtnDown.IsEnabled = ($count -gt 0)
+    $on = ($count -gt 0 -and -not $script:Done -and (Test-Visible $script:Items[$script:Index]))
+    $BtnYes.IsEnabled = $on; $BtnNo.IsEnabled = $on; $BtnUnsure.IsEnabled = $on
+    $BtnMap.IsEnabled = ($on -and $script:Items[$script:Index].MapUrl -ne '')
+    $BtnUp.IsEnabled = ($vis.Count -gt 0); $BtnDown.IsEnabled = ($vis.Count -gt 0)
     $CurrentNote.Text = ''
     if ($count -eq 0) {
         $PosText.Text = '0 / 0'
-        $CurrentText.Text = 'Vložte řádky z Excelu a klikněte na Vytvořit seznam'
+        $CurrentText.Text = 'Načtěte data z Excelu'
         $CurrentText.Foreground = $bMuted
     } elseif ($script:Done) {
-        $PosText.Text = "$count / $count"
-        $CurrentText.Text = '✓ Hotovo – všechny řádky jsou rozhodnuté'
+        $PosText.Text = "$($vis.Count) / $($vis.Count)"
+        $CurrentText.Text = '✓ Hotovo – všechny zobrazené řádky jsou rozhodnuté'
         $CurrentText.Foreground = $bDone
         $CurrentNote.Text = 'Šipkami ▲ ▼ nebo kliknutím do seznamu se můžete k libovolnému řádku vrátit.'
     } else {
-        $PosText.Text = "$($script:Index + 1) / $count"
+        $PosText.Text = "$($vis.IndexOf($script:Index) + 1) / $($vis.Count)"
         $item = $script:Items[$script:Index]
         $CurrentText.Text = $item.Value
         $CurrentText.Foreground = $bText
@@ -730,7 +868,7 @@ function Update-View {
 # Zobrazí aktuální řádek a zkopíruje jeho první hodnotu do schránky
 function Show-Current {
     Update-View
-    if (-not $script:Done -and $script:Index -lt $script:Items.Count) {
+    if (-not $script:Done -and $script:Index -lt $script:Items.Count -and (Test-Visible $script:Items[$script:Index])) {
         if (-not (Set-ClipboardText $script:Items[$script:Index].Value)) {
             Show-Warn 'Hodnotu se nepodařilo zkopírovat do schránky (schránka je možná obsazená jinou aplikací).'
         }
@@ -744,7 +882,7 @@ function Move-NextUndecided {
     foreach ($wanted in @('', 'unsure')) {
         for ($k = 1; $k -le $count; $k++) {
             $i = ($script:Index + $k) % $count
-            if ($script:Items[$i].Status -eq $wanted) {
+            if ($script:Items[$i].Status -eq $wanted -and (Test-Visible $script:Items[$i])) {
                 $script:Index = $i
                 $script:Done = $false
                 Show-Current
@@ -756,12 +894,20 @@ function Move-NextUndecided {
     Show-Current
 }
 
-# Ruční posun o $delta řádků
+# Ruční posun o $delta viditelných řádků
 function Move-By([int]$delta) {
-    $count = $script:Items.Count
-    if ($count -eq 0) { return }
+    $vis = Get-VisibleIndexes
+    if ($vis.Count -eq 0) { return }
     if ($script:Done) { $script:Done = $false; $delta = 0 }
-    $script:Index = [Math]::Max(0, [Math]::Min($count - 1, $script:Index + $delta))
+    $pos = $vis.IndexOf($script:Index)
+    if ($pos -lt 0) {
+        # aktuální řádek je schovaný filtrem: nejbližší viditelný za ním
+        $pos = 0
+        for ($p = 0; $p -lt $vis.Count; $p++) { if ($vis[$p] -gt $script:Index) { $pos = $p; break } }
+        $delta = 0
+    }
+    $pos = [Math]::Max(0, [Math]::Min($vis.Count - 1, $pos + $delta))
+    $script:Index = $vis[$pos]
     Show-Current
 }
 
@@ -840,11 +986,11 @@ function Update-InputCount {
     $text = "Řádků: $($rows.Count)"
     $CountText.Foreground = $bText
     if ($rows.Count -gt 0) {
-        if ($rows[0].Split("`t").Count -ne 3) {
+        if ($rows[0].Split("`t").Count -ne 7) {
             $text = $text + '   •   vložte řádky z Excelu přes Ctrl+V'
             $CountText.Foreground = $bWarn
         } else {
-            $cats = @($rows | ForEach-Object { $_.Split("`t")[0].Trim() } | Select-Object -Unique).Count
+            $cats = @($rows | ForEach-Object { $_.Split("`t")[1].Trim() } | Select-Object -Unique).Count
             $text = $text + "   •   složek: $cats"
         }
     }
@@ -874,16 +1020,31 @@ $InputBox.AddHandler([System.Windows.Input.CommandManager]::PreviewExecutedEvent
         } 'Vložení ze schránky se nezdařilo.'
     })
 
-$BtnLoad.Add_Click({ Invoke-Safe {
-    if ($script:Items.Count -gt 0) { Show-Warn 'Seznam už je vytvořený. Pro nové vložení ho nejdřív zrušte (Zrušit seznam).'; return }
-    $parsed = ConvertFrom-Rows $InputBox.Text
-    if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
-    if ($parsed.Items.Count -eq 0) { Show-Error 'Vstup neobsahuje žádný neprázdný řádek.'; return }
+# Založí nový seznam z načtených záznamů
+function Start-List($parsed) {
+    if ($parsed.Items.Count -eq 0) { Show-Error 'Nebyl nalezen žádný záznam.'; return }
     $script:Items = Group-Items $parsed.Items
+    $script:Revision = [string]$parsed.Revision
     $script:Collapsed = @{}
+    $script:GroupFilter = @{}
     $script:Index = 0
     $script:Done = $false
     Show-Current
+}
+
+$BtnExcel.Add_Click({ Invoke-Safe {
+    if ($script:Items.Count -gt 0 -and -not (Ask-YesNo ('Seznam už je vytvořený. Nahradit ho daty z Excelu?' + "`n`n" + 'Poznámky zůstanou beze změny.') 'Načíst z Excelu')) { return }
+    $win.Cursor = [System.Windows.Input.Cursors]::Wait
+    try { $parsed = Read-FromExcel } finally { $win.Cursor = $null }
+    if (-not $parsed.Ok) { Show-Error $parsed.Error; return }   # stávající seznam ani poznámky se nemění
+    Start-List $parsed
+} 'Data z Excelu se nepodařilo načíst. Zkontrolujte, že je soubor otevřený a data jsou načtená.' })
+
+$BtnLoad.Add_Click({ Invoke-Safe {
+    if ($script:Items.Count -gt 0) { Show-Warn 'Seznam už je vytvořený. Pro nové vložení ho nejdřív zrušte (Zrušit seznam).'; return }
+    $parsed = ConvertFrom-Rows $InputBox.Text
+    if (-not $parsed.Ok) { Show-Error $parsed.Error; return }
+    Start-List $parsed
 } 'Seznam se nepodařilo načíst. Zkuste znovu zkopírovat data z Excelu.' })
 
 $BtnClear.Add_Click({ Invoke-Safe {
@@ -891,13 +1052,15 @@ $BtnClear.Add_Click({ Invoke-Safe {
     $script:Items = New-Object System.Collections.Generic.List[object]
     $script:Index = 0
     $script:Done = $false
+    $script:Revision = ''
     Update-View
     $InputBox.Clear()
 } 'Seznam se nepodařilo vymazat.' })
 
 # Kliknutí v seznamu: na záhlaví složky ji rozbalí / sbalí, na záznam ho udělá aktuálním
-$ItemsList.Add_SelectionChanged({
+$ItemsList.Add_SelectionChanged({ param($s, $e)
     if ($script:Syncing) { return }
+    if (-not [object]::ReferenceEquals($e.OriginalSource, $ItemsList)) { return }   # změna ve výběru stanice / délky
     Invoke-Safe {
         $row = $ItemsList.SelectedItem
         if ($null -eq $row) { return }
@@ -917,8 +1080,31 @@ $ItemsList.Add_SelectionChanged({
     } 'Přechod na řádek se nezdařil.'
 })
 
+# Výběr stanice / délky v záhlaví složky: ostatní záznamy složky se schovají
+$ItemsList.AddHandler([System.Windows.Controls.Primitives.Selector]::SelectionChangedEvent,
+    [System.Windows.Controls.SelectionChangedEventHandler]{
+        param($s, $e)
+        $cb = $e.OriginalSource
+        if ($cb -isnot [System.Windows.Controls.ComboBox]) { return }
+        $e.Handled = $true
+        if ($script:Syncing -or $null -eq $cb.SelectedItem) { return }
+        $row = $cb.DataContext
+        if ($null -eq $row -or $row.Kind -ne 'H') { return }
+        $f = Get-GroupFilter $row.Category
+        $val = [string]$cb.SelectedItem
+        if ($f[$cb.Tag] -eq $val) { return }   # stejná hodnota (např. při vykreslení)
+        $f[$cb.Tag] = $val
+        # seznam se přestaví až po dokončení této události
+        [void]$win.Dispatcher.BeginInvoke([Action]{ Invoke-Safe {
+            # aktuální řádek se schoval (nebo bylo hotovo): přejít na další viditelný nerozhodnutý
+            if ($script:Done -or -not (Test-Visible $script:Items[$script:Index])) { Move-NextUndecided }
+            else { Update-View }
+        } 'Filtr se nepodařilo použít.' })
+    })
+
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
 $ItemsList.Add_PreviewKeyDown({ param($s, $e)
+    if ($e.OriginalSource -is [System.Windows.Controls.ComboBox] -or $e.OriginalSource -is [System.Windows.Controls.ComboBoxItem]) { return }
     $d = switch ($e.Key) { 'Up' { -1 } 'Down' { 1 } 'PageUp' { -10 } 'PageDown' { 10 } default { 0 } }
     if ($d -ne 0) {
         $e.Handled = $true
@@ -926,78 +1112,20 @@ $ItemsList.Add_PreviewKeyDown({ param($s, $e)
     }
 })
 
+# Zobrazit na mapě: otevře odkaz (dmwmap://…) aktuálního záznamu v aplikaci, která ho umí otevřít
+$BtnMap.Add_Click({ Invoke-Safe {
+    if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
+    $url = $script:Items[$script:Index].MapUrl
+    if ($url -eq '') { Show-Warn "Aktuální záznam nemá odkaz na mapu ($($script:ColMap). sloupec je prázdný)."; return }
+    try { Start-Process $url }
+    catch { Show-Error "Odkaz se nepodařilo otevřít:`n$url`n`nZkontrolujte, že je v počítači aplikace pro odkazy dmwmap://." }
+} 'Odkaz se nepodařilo otevřít.' })
+
 $BtnYes.Add_Click({ Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' })
 $BtnNo.Add_Click({ Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' })
 $BtnUnsure.Add_Click({ Invoke-Safe { Set-Decision 'unsure' } 'Označení se nezdařilo.' })
 $BtnUp.Add_Click({ Invoke-Safe { Move-By -1 } 'Přechod na řádek se nezdařil.' })
 $BtnDown.Add_Click({ Invoke-Safe { Move-By 1 } 'Přechod na řádek se nezdařil.' })
-
-# Vložit mezi: vloží se řádky z Excelu stejně jako do hlavního pole (Ctrl+V), zařadí se za aktuální řádek
-# do stejné složky jako aktuální řádek; aktuální řádek se nemění
-$BtnInsert.Add_Click({ Invoke-Safe {
-    if ($script:Done -or $script:Index -ge $script:Items.Count) { return }
-    [xml]$dx = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Title="Vložit mezi" Width="720" Height="420" WindowStartupLocation="CenterOwner"
-        ShowInTaskbar="False" FontFamily="Segoe UI" FontSize="14" Background="White" UseLayoutRounding="True">
-  <Grid Margin="18">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <TextBlock Text="Vložte řádky z Excelu (Ctrl+V) – zařadí se hned pod aktuální řádek (do jeho složky)." TextWrapping="Wrap" Foreground="#475569"/>
-    <TextBox Name="Box" Grid.Row="1" Margin="0,10,0,10" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
-             FontFamily="Consolas" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" Padding="8,6"
-             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
-    <DockPanel Grid.Row="2">
-      <TextBlock Name="Cnt" Text="Řádků: 0" FontWeight="SemiBold" VerticalAlignment="Center"/>
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Name="Ok" Content="Vložit" Width="110" Padding="0,7" Margin="0,0,8,0" Background="#0E7490" Foreground="White" BorderThickness="0"/>
-        <Button Name="Cancel" Content="Zrušit" Width="110" Padding="0,7" IsCancel="True" Background="#E8EDF4" BorderThickness="0"/>
-      </StackPanel>
-    </DockPanel>
-  </Grid>
-</Window>
-'@
-    $dlg = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
-    $dlg.Owner = $win
-    $box = $dlg.FindName('Box'); $cnt = $dlg.FindName('Cnt')
-    $box.AddHandler([System.Windows.Input.CommandManager]::PreviewExecutedEvent,
-        [System.Windows.Input.ExecutedRoutedEventHandler]{
-            param($s, $e)
-            if ($e.Command -ne [System.Windows.Input.ApplicationCommands]::Paste) { return }
-            $e.Handled = $true
-            Invoke-Safe {
-                if (-not [System.Windows.Clipboard]::ContainsText()) { return }
-                $r = Reduce-PastedColumns ([System.Windows.Clipboard]::GetText())
-                if ($r.Error) { Show-Error $r.Error; return }
-                $box.SelectedText = $r.Text
-                $box.CaretIndex = $box.SelectionStart + $box.SelectionLength
-                $box.SelectionLength = 0
-            } 'Vložení ze schránky se nezdařilo.'
-        })
-    $box.Add_TextChanged({
-        $n = @(Get-ColumnLines $box.Text | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Replace("`t", '')) }).Count
-        $cnt.Text = "Řádků: $n"
-    })
-    $script:InsertParsed = $null
-    $dlg.FindName('Ok').Add_Click({
-        $p = ConvertFrom-Rows $box.Text $true
-        if (-not $p.Ok) { Show-Error $p.Error; return }
-        if ($p.Items.Count -eq 0) { Show-Warn 'Vložte aspoň jeden řádek.'; return }
-        $script:InsertParsed = $p.Items
-        $dlg.DialogResult = $true
-    })
-    [void]$box.Focus()
-    if ($dlg.ShowDialog() -eq $true -and $script:InsertParsed) {
-        $current = $script:Items[$script:Index]
-        $list = New-Object System.Collections.Generic.List[object]
-        $list.AddRange($script:Items)
-        # vložené řádky patří do složky aktuálního řádku, aby se objevily přímo pod ním
-        foreach ($it in $script:InsertParsed) { $it.Category = $current.Category }
-        $list.InsertRange($script:Index + 1, $script:InsertParsed)
-        $script:Items = Group-Items $list
-        $script:Index = $script:Items.IndexOf($current)   # aktuální řádek zůstává stejný
-        Update-View
-    }
-} 'Záznamy se nepodařilo vložit.' })
 
 $BtnOpen.Add_Click({ Invoke-Safe {
     if ($NotesBox.Text.Trim() -ne '') {

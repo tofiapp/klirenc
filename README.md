@@ -20,21 +20,25 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
 
 ## Použití
 
-1. Chcete-li pokračovat v dřívějších poznámkách, klikněte na **Otevřít soubor…** a vyberte `.txt`. Jeho název se zobrazí v poli **Název souboru** a nové zápisy se přidávají na konec.
-2. V Excelu označte celý rozsah řádků přes všechny sloupce (34), stiskněte Ctrl+C a vložte ho do pole vlevo nahoře (Ctrl+V). Aplikace si ponechá jen 3 sloupce, ostatní zahodí hned při vložení:
-   - **1. sloupec** = složka (kategorie),
-   - **10. sloupec** = *Údaj k ověření*,
-   - **poslední sloupec** = poznámka při Vymazat.
-3. Klikněte na **Vytvořit seznam**. Záznamy se roztřídí do **složek** podle 1. sloupce. Složky jsou seřazené podle data RRMMDD od nejstarší, složky bez data jsou na konci. Kliknutím na záhlaví složky ji sbalíte nebo rozbalíte. U každé složky je vidět, kolik záznamů je hotovo.
-4. Místo vstupního pole se zobrazí seznam s číslem a stavem každého řádku: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později, bez značky ještě nerozhodnuto. Aktuální řádek je zvýrazněný, jeho hodnota je velkým písmem uprostřed a je vždy zkopírovaná ve schránce.
-   - **Ponechat** označí řádek ✓.
-   - **Vymazat** zapíše poznámku a označí řádek ✗. Prázdnou poznámku nezapíše, jen upozorní.
-   - **? Vrátit se později** označí řádek ?. Takové řádky přijdou na řadu, až nezbude žádný nerozhodnutý.
-   - Po rozhodnutí se automaticky přejde na další nerozhodnutý řádek.
-   - Šipkami **▲ ▼**, kliknutím na řádek v seznamu nebo klávesami ↑ ↓ v seznamu se můžete posouvat ručně a rozhodnutí změnit. Změna z ✓ na Vymazat zapíše poznámku. Změna z ✗ na Ponechat poznámku odebere.
-5. **Vkládání do jiné aplikace:** dokud aplikace běží (i na pozadí), **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem **Vkládat Ctrl + kliknutím** nahoře.
-5b. **+ Vložit mezi** otevře okno, do kterého vložíte řádky z Excelu stejně jako do hlavního pole. Zařadí se hned pod aktuální řádek, do jeho složky. Aktuální řádek se nezmění.
+1. V Excelu otevřete soubor **_kontrola_clearance_v4** uložený v počítači (ne online verzi) a makrem načtěte data. Data musí být na listu **ZJISTENI**, 1. řádek je záhlaví.
+2. V aplikaci klikněte na **Načíst z Excelu**. Aplikace si přečte data přímo z otevřeného Excelu a použije tyto sloupce:
+   - **1.** číslo revize (zobrazí se nad seznamem jako „Revize …“),
+   - **3.** složka (datum RRMMDD),
+   - **9.** stanice a **10.** délka (výběry v záhlaví složky),
+   - **12.** údaj k ověření,
+   - **16.** odkaz na mapu (dmwmap://…),
+   - **36.** poznámka při Vymazat.
+
+   Záloha: řádky lze také zkopírovat z Excelu, vložit do pole (Ctrl+V) a kliknout na **Vytvořit seznam**.
+3. Záznamy jsou roztříděné do **složek** podle data od nejstarší. Kliknutím na záhlaví složky ji sbalíte nebo rozbalíte. V záhlaví jsou dva výběry, **stanice** a **délka** (včetně „Vše“). Ostatní záznamy složky se schovají a šipky i Ponechat / Vymazat procházejí jen zobrazené záznamy.
+4. Aktuální hodnota se zobrazí velkým písmem a je vždy zkopírovaná ve schránce. Značky v seznamu: **✓** ponecháno, **✗** vymazáno (zapsáno v poznámkách), **?** vrátit se později.
+   - **Ponechat** označí řádek ✓, **Vymazat** zapíše poznámku a označí řádek ✗, **? Vrátit se později** označí řádek ?.
+   - Po rozhodnutí se přejde na další nerozhodnutý zobrazený řádek.
+   - Šipkami **▲ ▼**, kliknutím na řádek nebo klávesami ↑ ↓ se můžete posouvat ručně a rozhodnutí změnit.
+   - **Zobrazit na mapě** otevře odkaz aktuálního záznamu.
+5. **Vkládání do jiné aplikace:** dokud aplikace běží, **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem nahoře.
 6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
-7. Ukládání (vždy UTF-8 `.txt`, v aplikaci se nic nemaže):
-   - **Uložit** zapíše do otevřeného souboru. Pokud jste v poli **Název souboru** změnili název, soubor se ve stejné složce **přejmenuje**.
-   - **Uložit jako…** se zeptá na nové umístění. Původní soubor zůstane.
+7. Ukládání poznámek (vždy UTF-8 `.txt`):
+   - **Otevřít soubor…** načte dřívější poznámky, nové zápisy se přidávají na konec.
+   - **Uložit** zapíše do otevřeného souboru. Pokud jste v poli **Název souboru** změnili název, soubor se ve stejné složce přejmenuje.
+   - **Uložit jako…** se zeptá na nové umístění.
