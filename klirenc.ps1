@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '30'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '31'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -151,12 +151,13 @@ public class KcRow : KcNotify {
     public object LOptions { get { return lOptions; } set { Set(ref lOptions, value, "LOptions"); } }
 }
 public class KcOption : KcNotify {
-    string text = "", kind = "", category = ""; bool isChecked = true, isAll;
+    string text = "", kind = "", category = ""; bool isChecked = true, isAll, available = true;
     public string Text { get { return text; } set { Set(ref text, value, "Text"); } }
     public string Kind { get { return kind; } set { Set(ref kind, value, "Kind"); } }
     public string Category { get { return category; } set { Set(ref category, value, "Category"); } }
     public bool Checked { get { return isChecked; } set { Set(ref isChecked, value, "Checked"); } }
     public bool IsAll { get { return isAll; } set { Set(ref isAll, value, "IsAll"); } }
+    public bool Available { get { return available; } set { Set(ref available, value, "Available"); } }
 }
 
 public static class KcTaskbar {
@@ -662,6 +663,7 @@ function Update-Shortcuts {
       <CheckBox x:Name="Cb" Content="{Binding Text}" IsChecked="{Binding Checked, Mode=TwoWay}" Margin="4,3" FontSize="12" Cursor="Hand"/>
       <DataTemplate.Triggers>
         <DataTrigger Binding="{Binding IsAll}" Value="True"><Setter TargetName="Cb" Property="FontWeight" Value="SemiBold"/></DataTrigger>
+        <DataTrigger Binding="{Binding Available}" Value="False"><Setter TargetName="Cb" Property="Visibility" Value="Collapsed"/></DataTrigger>
       </DataTemplate.Triggers>
     </DataTemplate>
 
@@ -948,9 +950,10 @@ $script:Headers = @{}        # složka -> řádek záhlaví (KcRow)
 $script:RowOf = @{}          # index záznamu -> zobrazený řádek (KcRow)
 $script:GroupRange = [ordered]@{}   # složka -> @(první index, poslední index)
 
+# Popisek výběru; počítá jen hodnoty, které v nabídce jsou (podle druhého filtru)
 function Get-FilterLabel($opts) {
-    $checked = @($opts | Where-Object { -not $_.IsAll -and $_.Checked })
-    $total = @($opts | Where-Object { -not $_.IsAll }).Count
+    $checked = @($opts | Where-Object { -not $_.IsAll -and $_.Available -and $_.Checked })
+    $total = @($opts | Where-Object { -not $_.IsAll -and $_.Available }).Count
     if ($checked.Count -eq $total) { return $script:All }
     if ($checked.Count -eq 0) { return 'Nic' }
     if ($checked.Count -eq 1) { return $checked[0].Text }
@@ -984,8 +987,8 @@ function Set-FilterOption($opt) {
     $opts = if ($opt.Kind -eq 'S') { $h.SOptions } else { $h.LOptions }
     $script:Syncing = $true
     try {
-        if ($opt.IsAll) { foreach ($o in $opts) { if (-not $o.IsAll) { $o.Checked = $opt.Checked } } }
-        else { $opts[0].Checked = (@($opts | Where-Object { -not $_.IsAll -and -not $_.Checked }).Count -eq 0) }
+        # „Vše“ zaškrtne / odškrtne hodnoty, které jsou v nabídce (jako v Excelu)
+        if ($opt.IsAll) { foreach ($o in $opts) { if (-not $o.IsAll -and $o.Available) { $o.Checked = $opt.Checked } } }
     } finally { $script:Syncing = $false }
     $set = (Get-GroupFilter $opt.Category)[$opt.Kind]
     $set.Clear()
@@ -1019,12 +1022,28 @@ function Update-Group([string]$cat) {
     $f = Get-GroupFilter $cat
     $collapsed = $script:Collapsed.ContainsKey($cat)
     $noS = ($f.S.Count -eq 0); $noL = ($f.L.Count -eq 0)
+    # filtry se ovlivňují: v nabídce délek jsou jen délky záznamů, které projdou filtrem stanic, a naopak
+    $availS = New-Object 'System.Collections.Generic.HashSet[string]'
+    $availL = New-Object 'System.Collections.Generic.HashSet[string]'
     for ($k = $r[0]; $k -le $r[1]; $k++) {
         $it = $script:Items[$k]
-        $vis = ($noS -or -not $f.S.Contains((Get-OptText $it.Station))) -and ($noL -or -not $f.L.Contains((Get-OptText $it.Length)))
+        $st = Get-OptText $it.Station; $ln = Get-OptText $it.Length
+        $okS = ($noS -or -not $f.S.Contains($st)); $okL = ($noL -or -not $f.L.Contains($ln))
+        if ($okL) { [void]$availS.Add($st) }
+        if ($okS) { [void]$availL.Add($ln) }
+        $vis = $okS -and $okL
         $it.Visible = $vis
         $script:RowOf[$k].Hidden = ($collapsed -or -not $vis)
     }
+    $h = $script:Headers[$cat]
+    $script:Syncing = $true
+    try {
+        foreach ($pair in @(@($h.SOptions, $availS), @($h.LOptions, $availL))) {
+            $opts = $pair[0]; $avail = $pair[1]
+            foreach ($o in $opts) { if (-not $o.IsAll) { $o.Available = $avail.Contains($o.Text) } }
+            $opts[0].Checked = (@($opts | Where-Object { -not $_.IsAll -and $_.Available -and -not $_.Checked }).Count -eq 0)
+        }
+    } finally { $script:Syncing = $false }
     Update-Header $cat
 }
 
