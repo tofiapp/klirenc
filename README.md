@@ -35,6 +35,7 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - **Ponechat** označí řádek ✓, **Vymazat** zapíše poznámku a označí řádek ✗, **? Vrátit se později** označí řádek ?.
    - Po rozhodnutí se přejde na další nerozhodnutý zobrazený řádek.
    - Při posouvání seznamu zůstává záhlaví aktuálně zobrazené složky (s filtry) připíchnuté nahoře.
+   - Pravým tlačítkem na záznamu → **Zobrazit vše z této stanice**: ve složce se ve filtru nechá jen stanice záznamu a délky se nastaví na Vše.
    - Šipkami **▲ ▼**, kliknutím na řádek nebo klávesami ↑ ↓ se můžete posouvat ručně a rozhodnutí změnit.
    - **Zobrazit fotku** otevře odkaz aktuálního záznamu.
 5. **Vkládání do jiné aplikace:** dokud aplikace běží, **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem nahoře.

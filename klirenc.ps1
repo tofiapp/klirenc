@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '31'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '32'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -1453,6 +1453,53 @@ $StickyHeader.Add_MouseLeftButtonUp({ param($s, $e) Invoke-Safe {
     $ItemsList.ScrollIntoView($h)
     $StickyHeader.Visibility = 'Collapsed'
 } 'Složku se nepodařilo sbalit.' })
+
+# Ve složce záznamu nechá ve filtru jen jeho stanici a délky nastaví na Vše (zobrazí se všechny délky dané stanice).
+# Složka se rozbalí a záznam se stane aktuálním.
+function Show-StationOnly([int]$idx) {
+    $it = $script:Items[$idx]
+    $cat = $it.Category
+    $h = $script:Headers[$cat]
+    $f = Get-GroupFilter $cat
+    $st = Get-OptText $it.Station
+    $f.S.Clear(); $f.L.Clear()
+    $script:Syncing = $true
+    try {
+        foreach ($o in $h.SOptions) {
+            if ($o.IsAll) { continue }
+            $o.Checked = ($o.Text -eq $st)
+            if (-not $o.Checked) { [void]$f.S.Add($o.Text) }
+        }
+        foreach ($o in $h.LOptions) { $o.Checked = $true }
+    } finally { $script:Syncing = $false }
+    [void]$script:Collapsed.Remove($cat)
+    Update-Group $cat
+    $script:Index = $idx
+    $script:Done = $false
+    Show-Current
+}
+
+# Pravé tlačítko na záznamu: nabídka „Zobrazit vše z této stanice“
+$script:CtxIndex = -1
+$ctxMenu = New-Object System.Windows.Controls.ContextMenu
+$ctxStation = New-Object System.Windows.Controls.MenuItem
+$ctxStation.Header = 'Zobrazit vše z této stanice'
+[void]$ctxMenu.Items.Add($ctxStation)
+$ItemsList.ContextMenu = $ctxMenu
+$ItemsList.Add_ContextMenuOpening({ param($s, $e)
+    $script:CtxIndex = -1
+    $c = $null
+    if ($e.OriginalSource -is [System.Windows.DependencyObject]) {
+        $c = [System.Windows.Controls.ItemsControl]::ContainerFromElement($ItemsList, $e.OriginalSource)
+    }
+    if ($null -eq $c -or $null -eq $c.DataContext -or $c.DataContext.Kind -ne 'I') { $e.Handled = $true; return }   # jen na záznamu
+    $script:CtxIndex = $c.DataContext.Index
+    $st = $script:Items[$script:CtxIndex].Station
+    $ctxStation.Header = if ($st -ne '') { "Zobrazit vše z této stanice ($st)" } else { 'Zobrazit vše z této stanice' }
+})
+$ctxStation.Add_Click({ Invoke-Safe {
+    if ($script:CtxIndex -ge 0 -and $script:CtxIndex -lt $script:Items.Count) { Show-StationOnly $script:CtxIndex }
+} 'Filtr se nepodařilo použít.' })
 
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
 $ItemsList.Add_PreviewKeyDown({ param($s, $e)
