@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '33'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '34'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -215,15 +215,94 @@ function New-Item2([string]$value, [string]$note, [bool]$manual = $false, [strin
                        Station = $station; Length = $length; MapUrl = $mapUrl; Visible = $true }
 }
 
+# Vlastní dialog ve vzhledu aplikace (místo šedého okna Windows).
+# $kind: Information / Warning / Error / Question; $yesNo: tlačítka Ano / Ne. Vrací $true pro OK / Ano.
+function Show-KcDialog([string]$text, [string]$title, [string]$kind, [bool]$yesNo = $false) {
+    [xml]$dx = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight" ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI" FontSize="14" UseLayoutRounding="True" Topmost="False">
+  <Window.Resources>
+    <Style x:Key="DBtn" TargetType="Button" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+      <Setter Property="Background" Value="#E8EDF4"/>
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="MinWidth" Value="96"/>
+      <Setter Property="Padding" Value="18,8"/>
+      <Setter Property="Margin" Value="8,0,0,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <Border Margin="18" Background="White" CornerRadius="12" BorderBrush="#E2E8F0" BorderThickness="1" MinWidth="360" MaxWidth="480">
+    <Border.Effect><DropShadowEffect BlurRadius="22" ShadowDepth="3" Opacity="0.22" Color="#0F172A"/></Border.Effect>
+    <Grid Margin="22,20,22,18">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <StackPanel Name="Head" Orientation="Horizontal" Background="Transparent">
+        <Border Name="IconBg" Width="30" Height="30" CornerRadius="15" Background="#0E7490">
+          <TextBlock Name="IconTx" Text="i" Foreground="White" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBlock Name="TitleTx" FontSize="16" FontWeight="SemiBold" Foreground="#0F172A" Margin="12,0,0,0" VerticalAlignment="Center"/>
+      </StackPanel>
+      <TextBlock Name="MsgTx" Grid.Row="1" TextWrapping="Wrap" Foreground="#334155" Margin="0,14,0,20" LineHeight="20"/>
+      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Name="BNo" Style="{StaticResource DBtn}" Content="Ne" IsCancel="True"/>
+        <Button Name="BYes" Style="{StaticResource DBtn}" Content="OK" IsDefault="True" Background="#0E7490" Foreground="White" FontWeight="SemiBold"/>
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>
+'@
+    $d = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
+    if ($win -and $win.IsLoaded) { $d.Owner = $win } else { $d.WindowStartupLocation = 'CenterScreen' }
+    $colors = @{ Information = '#0E7490'; Question = '#0E7490'; Warning = '#D97706'; Error = '#E11D48' }
+    $glyphs = @{ Information = 'i'; Question = '?'; Warning = '!'; Error = '✕' }
+    if (-not $colors.ContainsKey($kind)) { $kind = 'Information' }
+    $d.FindName('IconBg').Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($colors[$kind]))
+    $d.FindName('IconTx').Text = $glyphs[$kind]
+    $d.FindName('TitleTx').Text = $title
+    $d.FindName('MsgTx').Text = $text
+    $bYes = $d.FindName('BYes'); $bNo = $d.FindName('BNo')
+    if ($yesNo) { $bYes.Content = 'Ano' }
+    else { $bNo.Visibility = 'Collapsed'; $bYes.IsCancel = $true }
+    if ($kind -eq 'Error' -or $kind -eq 'Warning') { if (-not $yesNo) { $bYes.Background = $d.FindName('IconBg').Background } }
+    $script:DlgResult = $false
+    $bYes.Add_Click({ $script:DlgResult = $true; $d.Close() })
+    $bNo.Add_Click({ $script:DlgResult = $false; $d.Close() })
+    $d.FindName('Head').Add_MouseLeftButtonDown({ try { $d.DragMove() } catch { } })   # okno jde přetáhnout za nadpis
+    [void]$d.ShowDialog()
+    return [bool]$script:DlgResult
+}
+
 function Show-Msg([string]$text, [string]$icon) {
-    if ($win) { [void][System.Windows.MessageBox]::Show($win, $text, 'Kontrola Clearance', 'OK', $icon) }
-    else { [void][System.Windows.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', $icon) }
+    try {
+        $title = switch ($icon) { 'Warning' { 'Upozornění' } 'Error' { 'Chyba' } default { 'Kontrola Clearance' } }
+        [void](Show-KcDialog $text $title $icon $false)
+    } catch {
+        # záloha: běžné okno Windows
+        if ($win) { [void][System.Windows.MessageBox]::Show($win, $text, 'Kontrola Clearance', 'OK', $icon) }
+        else { [void][System.Windows.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', $icon) }
+    }
 }
 function Show-Info([string]$text)  { Show-Msg $text 'Information' }
 function Show-Warn([string]$text)  { Show-Msg $text 'Warning' }
 function Show-Error([string]$text) { Show-Msg $text 'Error' }
 function Ask-YesNo([string]$text, [string]$title, [string]$icon = 'Question') {
-    ([System.Windows.MessageBox]::Show($win, $text, $title, 'YesNo', $icon)) -eq 'Yes'
+    try { return (Show-KcDialog $text $title $icon $true) }
+    catch { return ([System.Windows.MessageBox]::Show($win, $text, $title, 'YesNo', $icon)) -eq 'Yes' }
 }
 
 # Bezpečné spuštění obsluhy události - uživateli se nezobrazí technická chyba
@@ -723,6 +802,56 @@ function Update-Shortcuts {
                 <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
               </Trigger>
             </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- Nabídka pravého tlačítka ve vzhledu aplikace -->
+    <Style x:Key="KcMenu" TargetType="ContextMenu">
+      <Setter Property="HasDropShadow" Value="False"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ContextMenu">
+            <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" Padding="4" Margin="0,0,10,10">
+              <Border.Effect><DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.18" Color="#0F172A"/></Border.Effect>
+              <StackPanel IsItemsHost="True"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="KcMenuItem" TargetType="MenuItem">
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="MenuItem">
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="12,7">
+              <ContentPresenter ContentSource="Header" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBg}"/>
+                <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Bublinová nápověda (tooltip) ve vzhledu aplikace -->
+    <Style TargetType="ToolTip">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToolTip">
+            <Border Background="#1E293B" CornerRadius="6" Padding="9,5">
+              <ContentPresenter/>
+            </Border>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
@@ -1512,6 +1641,11 @@ $ctxRestore = New-Object System.Windows.Controls.MenuItem
 $ctxRestore.Header = 'Vrátit původní filtr'
 [void]$ctxMenu.Items.Add($ctxStation)
 [void]$ctxMenu.Items.Add($ctxRestore)
+try {
+    $ctxMenu.Style = $win.FindResource('KcMenu')
+    $ctxStation.Style = $win.FindResource('KcMenuItem')
+    $ctxRestore.Style = $win.FindResource('KcMenuItem')
+} catch { }
 $ItemsList.ContextMenu = $ctxMenu
 $ItemsList.Add_ContextMenuOpening({ param($s, $e)
     $script:CtxIndex = -1
