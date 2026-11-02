@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '35'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '36'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -33,6 +33,7 @@ public static class KlirencCtrlClick {
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 
@@ -65,18 +66,18 @@ public static class KlirencCtrlClick {
         if (khook != IntPtr.Zero) { UnhookWindowsHookEx(khook); khook = IntPtr.Zero; }
     }
 
-    // ---- Klávesy F9 (Ponechat) a F10 (Vymazat) fungující v celých Windows ----
+    // ---- Klávesy F8 (vložit), F9 (Ponechat) a F10 (Vymazat) fungující v celých Windows ----
     [StructLayout(LayoutKind.Sequential)]
     private struct KBDLLHOOKSTRUCT { public uint vkCode; public uint scanCode; public uint flags; public uint time; public IntPtr extra; }
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
     private const uint LLKHF_INJECTED = 0x10;
-    private const uint VK_F9 = 0x78, VK_F10 = 0x79;
+    private const uint VK_F8 = 0x77, VK_F9 = 0x78, VK_F10 = 0x79;
     private static HookProc kproc = KeyCallback;   // drží delegáta, aby ho neuklidil GC
     private static IntPtr khook = IntPtr.Zero;
-    private static bool f9Down = false, f10Down = false;
+    private static bool f8Down = false, f9Down = false, f10Down = false;
 
-    public static volatile int KeyPending = 0;     // 1 = F9 (Ponechat), 2 = F10 (Vymazat)
+    public static volatile int KeyPending = 0;     // 1 = F9 (Ponechat), 2 = F10 (Vymazat), 3 = F8 (vložit)
     public static volatile bool KeysEnabled = true;
 
     public static bool StartKeys() {
@@ -88,22 +89,23 @@ public static class KlirencCtrlClick {
         return khook != IntPtr.Zero;
     }
 
-    // F9 / F10 bez Ctrl, Alt a Shift: zachytí se (ostatní programy je nedostanou) a předají aplikaci.
+    // F8 / F9 / F10 bez Ctrl, Alt a Shift: zachytí se (ostatní programy je nedostanou) a předají aplikaci.
     // Držení klávesy se počítá jen jednou.
     private static IntPtr KeyCallback(int nCode, IntPtr wParam, IntPtr lParam) {
         try {
             if (nCode >= 0 && KeysEnabled) {
                 KBDLLHOOKSTRUCT k = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-                if ((k.flags & LLKHF_INJECTED) == 0 && (k.vkCode == VK_F9 || k.vkCode == VK_F10)) {
+                if ((k.flags & LLKHF_INJECTED) == 0 && (k.vkCode == VK_F8 || k.vkCode == VK_F9 || k.vkCode == VK_F10)) {
                     bool mods = (GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0 || (GetAsyncKeyState(0x10) & 0x8000) != 0;
                     if (!mods) {
                         int msg = wParam.ToInt32();
-                        bool isF9 = k.vkCode == VK_F9;
+                        uint vk = k.vkCode;
                         if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
-                            if (isF9) { if (!f9Down) { f9Down = true; KeyPending = 1; } }
-                            else { if (!f10Down) { f10Down = true; KeyPending = 2; } }
+                            if (vk == VK_F9) { if (!f9Down) { f9Down = true; KeyPending = 1; } }
+                            else if (vk == VK_F10) { if (!f10Down) { f10Down = true; KeyPending = 2; } }
+                            else { if (!f8Down) { f8Down = true; KeyPending = 3; } }
                         } else if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
-                            if (isF9) f9Down = false; else f10Down = false;
+                            if (vk == VK_F9) f9Down = false; else if (vk == VK_F10) f10Down = false; else f8Down = false;
                         }
                         return (IntPtr)1;
                     }
@@ -120,6 +122,13 @@ public static class KlirencCtrlClick {
         uint pid;
         GetWindowThreadProcessId(w, out pid);
         return pid != 0 && pid != ownPid;
+    }
+
+    // Je kurzor myši nad oknem jiné aplikace? (pro vložení klávesou F8)
+    public static bool CursorIsOther() {
+        POINT pt;
+        if (!GetCursorPos(out pt)) return false;
+        return PointIsOther(pt);
     }
 
     // Ctrl + levé kliknutí v jiné aplikaci: původní kliknutí se zahodí (aby se neprovedla akce Ctrl+klik)
@@ -917,8 +926,8 @@ function Update-Shortcuts {
         </Grid.ColumnDefinitions>
         <TextBlock Text="Kontrola Clearance" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
         <CheckBox x:Name="ChkCtrl" Grid.Column="2" Content="Vkládat Ctrl + kliknutím" IsChecked="True" VerticalAlignment="Center" Margin="0,0,28,0" Foreground="{StaticResource Muted}"/>
-        <CheckBox x:Name="ChkKeys" Grid.Column="3" Content="Klávesy F9 / F10" IsChecked="True" VerticalAlignment="Center" Margin="0,0,28,0" Foreground="{StaticResource Muted}"
-                  ToolTip="F9 = Ponechat, F10 = Vymazat – fungují i v jiném okně"/>
+        <CheckBox x:Name="ChkKeys" Grid.Column="3" Content="Klávesy F8 / F9 / F10" IsChecked="True" VerticalAlignment="Center" Margin="0,0,28,0" Foreground="{StaticResource Muted}"
+                  ToolTip="F8 = vložit údaj do pole pod myší, F9 = Ponechat, F10 = Vymazat – fungují i v jiném okně"/>
         <TextBlock x:Name="PosText" Grid.Column="4" Text="0 / 0" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"/>
       </Grid>
     </Border>
@@ -1844,14 +1853,14 @@ $ChkCtrl.Add_Click({
     if ($script:MiddleHookOk) { [KlirencCtrlClick]::Enabled = [bool]$ChkCtrl.IsChecked }
 })
 
-# ---------- Klávesy F9 (Ponechat) a F10 (Vymazat) ----------
+# ---------- Klávesy F8 (vložit), F9 (Ponechat) a F10 (Vymazat) ----------
 # Fungují v celých Windows, i když je aktivní jiné okno; vypínají se zaškrtávátkem v hlavičce
 $script:KeysOk = $false
 try { $script:KeysOk = [KlirencCtrlClick]::StartKeys() } catch { $script:KeysOk = $false }
 if (-not $script:KeysOk) {
     $ChkKeys.IsChecked = $false
     $ChkKeys.IsEnabled = $false
-    $ChkKeys.Content = 'Klávesy F9 / F10 nejsou dostupné'
+    $ChkKeys.Content = 'Klávesy F8 / F9 / F10 nejsou dostupné'
 }
 function Update-KeyHints {
     $v = if ($script:KeysOk -and [bool]$ChkKeys.IsChecked) { 'Visible' } else { 'Collapsed' }
@@ -1868,7 +1877,7 @@ $script:InKeyAction = $false
 $ctrlTimer = New-Object System.Windows.Threading.DispatcherTimer
 $ctrlTimer.Interval = [TimeSpan]::FromMilliseconds(40)
 $ctrlTimer.Add_Tick({
-    # F9 / F10 -> Ponechat / Vymazat (jen jednou najednou, např. když je otevřená hláška)
+    # F8 / F9 / F10 -> vložit / Ponechat / Vymazat (jen jednou najednou, např. když je otevřená hláška)
     try {
         if ($script:KeysOk -and -not $script:InKeyAction) {
             $k = [KlirencCtrlClick]::KeyPending
@@ -1878,6 +1887,15 @@ $ctrlTimer.Add_Tick({
                 try {
                     if ($k -eq 1) { Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' }
                     elseif ($k -eq 2) { Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' }
+                    elseif ($k -eq 3) {
+                        # F8: vložit aktuální údaj do pole jiné aplikace, nad kterým je myš (bez klikání)
+                        if (-not $script:Done -and $script:Index -lt $script:Items.Count -and [KlirencCtrlClick]::CursorIsOther()) {
+                            if (Set-ClipboardText $script:Items[$script:Index].Value) {
+                                Start-Sleep -Milliseconds 60
+                                [KlirencCtrlClick]::ClickSelectAllPaste()
+                            }
+                        }
+                    }
                 } finally { $script:InKeyAction = $false }
             }
         }

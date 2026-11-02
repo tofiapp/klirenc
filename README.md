@@ -38,8 +38,12 @@ Parametr `-ExecutionPolicy Bypass` platí jen pro tento jeden proces, systémovo
    - Pravým tlačítkem na záznamu → **Zobrazit vše z této stanice**: ve složce se ve filtru nechá jen stanice záznamu a délky se nastaví na Vše. **Vrátit původní filtr** (také pravým tlačítkem, i na záhlaví složky) vrátí filtr do stavu před touto volbou.
    - Šipkami **▲ ▼**, kliknutím na řádek nebo klávesami ↑ ↓ se můžete posouvat ručně a rozhodnutí změnit.
    - **Zobrazit fotku** otevře odkaz aktuálního záznamu.
-5. **Klávesy F9 / F10:** F9 = Ponechat, F10 = Vymazat. Fungují i ve chvíli, kdy je aktivní jiné okno (aplikace je zachytí, takže je ostatní programy nedostanou). Vypnout je jde zaškrtávátkem **Klávesy F9 / F10** nahoře.
-5b. **Vkládání do jiné aplikace:** dokud aplikace běží, **Ctrl + levé kliknutí** do pole v jiném okně vloží aktuální údaj (obsah pole se nahradí). Vypnout to jde zaškrtávátkem nahoře.
+5. **Klávesy F8 / F9 / F10** (fungují i ve chvíli, kdy je aktivní jiné okno; aplikace je zachytí, takže je ostatní programy nedostanou):
+   - **F8** vloží aktuální údaj do pole jiné aplikace, nad kterým je myš (obsah pole se nahradí). Stačí jednou najet myší na pole a pak už jen mačkat klávesy.
+   - **F9** = Ponechat, **F10** = Vymazat.
+   - Postup: najeďte myší na pole v jiné aplikaci → **F8** (vloží údaj) → zkontrolujete → **F9** nebo **F10** → znovu **F8** pro další údaj…
+   - Vypnout je jde zaškrtávátkem **Klávesy F8 / F9 / F10** nahoře.
+5b. **Ctrl + levé kliknutí** do pole v jiném okně dělá totéž co F8 (pro ty, kdo chtějí klikat). Vypnout to jde zaškrtávátkem nahoře.
 6. **Zrušit seznam** (s potvrzením) smaže seznam a vstupní pole. Poznámky zůstanou.
 7. Ukládání poznámek (vždy UTF-8 `.txt`):
    - **Otevřít soubor…** načte dřívější poznámky, nové zápisy se přidávají na konec.
