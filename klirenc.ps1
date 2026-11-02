@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '32'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '33'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -1311,6 +1311,7 @@ function Start-List($parsed) {
     $script:Items = Group-Items $parsed.Items
     $script:Revision = [string]$parsed.Revision
     $script:GroupFilter = @{}
+    $script:SavedFilter = @{}
     # po načtení jsou všechny složky sbalené
     $script:Collapsed = @{}
     foreach ($it in $script:Items) { $script:Collapsed[$it.Category] = $true }
@@ -1456,50 +1457,90 @@ $StickyHeader.Add_MouseLeftButtonUp({ param($s, $e) Invoke-Safe {
 
 # Ve složce záznamu nechá ve filtru jen jeho stanici a délky nastaví na Vše (zobrazí se všechny délky dané stanice).
 # Složka se rozbalí a záznam se stane aktuálním.
+$script:SavedFilter = @{}   # složka -> filtr před „Zobrazit vše z této stanice“ (pro „Vrátit původní filtr“)
+
+# Nastaví zaškrtnutí voleb podle množin vyloučených hodnot a přepočítá složku
+function Set-GroupFilterState([string]$cat, $excludedS, $excludedL) {
+    $h = $script:Headers[$cat]
+    $f = Get-GroupFilter $cat
+    $f.S.Clear(); foreach ($v in $excludedS) { [void]$f.S.Add($v) }
+    $f.L.Clear(); foreach ($v in $excludedL) { [void]$f.L.Add($v) }
+    $script:Syncing = $true
+    try {
+        foreach ($o in $h.SOptions) { if (-not $o.IsAll) { $o.Checked = -not $f.S.Contains($o.Text) } }
+        foreach ($o in $h.LOptions) { if (-not $o.IsAll) { $o.Checked = -not $f.L.Contains($o.Text) } }
+    } finally { $script:Syncing = $false }
+    Update-Group $cat
+}
+
 function Show-StationOnly([int]$idx) {
     $it = $script:Items[$idx]
     $cat = $it.Category
     $h = $script:Headers[$cat]
     $f = Get-GroupFilter $cat
+    # zapamatovat původní filtr (jen poprvé, aby se dalo vrátit i po několika stanicích za sebou)
+    if (-not $script:SavedFilter.ContainsKey($cat)) {
+        $script:SavedFilter[$cat] = @{ S = @($f.S); L = @($f.L) }
+    }
     $st = Get-OptText $it.Station
-    $f.S.Clear(); $f.L.Clear()
-    $script:Syncing = $true
-    try {
-        foreach ($o in $h.SOptions) {
-            if ($o.IsAll) { continue }
-            $o.Checked = ($o.Text -eq $st)
-            if (-not $o.Checked) { [void]$f.S.Add($o.Text) }
-        }
-        foreach ($o in $h.LOptions) { $o.Checked = $true }
-    } finally { $script:Syncing = $false }
+    $exclS = @($h.SOptions | Where-Object { -not $_.IsAll -and $_.Text -ne $st } | ForEach-Object { $_.Text })
     [void]$script:Collapsed.Remove($cat)
-    Update-Group $cat
+    Set-GroupFilterState $cat $exclS @()
     $script:Index = $idx
     $script:Done = $false
     Show-Current
 }
 
-# Pravé tlačítko na záznamu: nabídka „Zobrazit vše z této stanice“
+# Vrátí filtr složky do stavu před „Zobrazit vše z této stanice“
+function Restore-GroupFilter([string]$cat) {
+    $saved = $script:SavedFilter[$cat]
+    if ($null -eq $saved) { return }
+    $script:SavedFilter.Remove($cat)
+    Set-GroupFilterState $cat $saved.S $saved.L
+    # aktuální řádek se schoval: přejít na další viditelný nerozhodnutý
+    if ($script:Done -or -not $script:Items[$script:Index].Visible) { Move-NextUndecided $false }
+    else { Update-View }
+}
+
+# Pravé tlačítko na záznamu: „Zobrazit vše z této stanice“ a „Vrátit původní filtr“
 $script:CtxIndex = -1
+$script:CtxCategory = $null
 $ctxMenu = New-Object System.Windows.Controls.ContextMenu
 $ctxStation = New-Object System.Windows.Controls.MenuItem
 $ctxStation.Header = 'Zobrazit vše z této stanice'
+$ctxRestore = New-Object System.Windows.Controls.MenuItem
+$ctxRestore.Header = 'Vrátit původní filtr'
 [void]$ctxMenu.Items.Add($ctxStation)
+[void]$ctxMenu.Items.Add($ctxRestore)
 $ItemsList.ContextMenu = $ctxMenu
 $ItemsList.Add_ContextMenuOpening({ param($s, $e)
     $script:CtxIndex = -1
+    $script:CtxCategory = $null
     $c = $null
     if ($e.OriginalSource -is [System.Windows.DependencyObject]) {
         $c = [System.Windows.Controls.ItemsControl]::ContainerFromElement($ItemsList, $e.OriginalSource)
     }
-    if ($null -eq $c -or $null -eq $c.DataContext -or $c.DataContext.Kind -ne 'I') { $e.Handled = $true; return }   # jen na záznamu
-    $script:CtxIndex = $c.DataContext.Index
-    $st = $script:Items[$script:CtxIndex].Station
-    $ctxStation.Header = if ($st -ne '') { "Zobrazit vše z této stanice ($st)" } else { 'Zobrazit vše z této stanice' }
+    if ($null -eq $c -or $null -eq $c.DataContext) { $e.Handled = $true; return }
+    $row = $c.DataContext
+    $script:CtxCategory = $row.Category
+    $canRestore = $script:SavedFilter.ContainsKey($row.Category)
+    if ($row.Kind -eq 'I') {
+        $script:CtxIndex = $row.Index
+        $st = $script:Items[$script:CtxIndex].Station
+        $ctxStation.Header = if ($st -ne '') { "Zobrazit vše z této stanice ($st)" } else { 'Zobrazit vše z této stanice' }
+        $ctxStation.Visibility = 'Visible'
+    } else {
+        $ctxStation.Visibility = 'Collapsed'   # na záhlaví složky jen vrácení filtru
+        if (-not $canRestore) { $e.Handled = $true; return }
+    }
+    $ctxRestore.Visibility = if ($canRestore) { 'Visible' } else { 'Collapsed' }
 })
 $ctxStation.Add_Click({ Invoke-Safe {
     if ($script:CtxIndex -ge 0 -and $script:CtxIndex -lt $script:Items.Count) { Show-StationOnly $script:CtxIndex }
 } 'Filtr se nepodařilo použít.' })
+$ctxRestore.Add_Click({ Invoke-Safe {
+    if ($null -ne $script:CtxCategory) { Restore-GroupFilter $script:CtxCategory }
+} 'Filtr se nepodařilo vrátit.' })
 
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
 $ItemsList.Add_PreviewKeyDown({ param($s, $e)
