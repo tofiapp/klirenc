@@ -2,7 +2,7 @@
 # Spuštění: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\klirenc.ps1
 # Okno je ve WPF (součást Windows) - písmo se vykresluje hladce i při zvětšeném zobrazení.
 
-$script:AppVersion = '31'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
+$script:AppVersion = '36'   # zobrazuje se v titulku okna - podle ní se pozná, která verze běží
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -33,6 +33,7 @@ public static class KlirencCtrlClick {
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
     [DllImport("user32.dll")] private static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 
@@ -62,6 +63,56 @@ public static class KlirencCtrlClick {
 
     public static void Stop() {
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+        if (khook != IntPtr.Zero) { UnhookWindowsHookEx(khook); khook = IntPtr.Zero; }
+    }
+
+    // ---- Klávesy F8 (vložit), F9 (Ponechat) a F10 (Vymazat) fungující v celých Windows ----
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KBDLLHOOKSTRUCT { public uint vkCode; public uint scanCode; public uint flags; public uint time; public IntPtr extra; }
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
+    private const uint LLKHF_INJECTED = 0x10;
+    private const uint VK_F8 = 0x77, VK_F9 = 0x78, VK_F10 = 0x79;
+    private static HookProc kproc = KeyCallback;   // drží delegáta, aby ho neuklidil GC
+    private static IntPtr khook = IntPtr.Zero;
+    private static bool f8Down = false, f9Down = false, f10Down = false;
+
+    public static volatile int KeyPending = 0;     // 1 = F9 (Ponechat), 2 = F10 (Vymazat), 3 = F8 (vložit)
+    public static volatile bool KeysEnabled = true;
+
+    public static bool StartKeys() {
+        if (khook != IntPtr.Zero) return true;
+        using (Process p = Process.GetCurrentProcess())
+        using (ProcessModule m = p.MainModule) {
+            khook = SetWindowsHookEx(WH_KEYBOARD_LL, kproc, GetModuleHandle(m.ModuleName), 0);
+        }
+        return khook != IntPtr.Zero;
+    }
+
+    // F8 / F9 / F10 bez Ctrl, Alt a Shift: zachytí se (ostatní programy je nedostanou) a předají aplikaci.
+    // Držení klávesy se počítá jen jednou.
+    private static IntPtr KeyCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+        try {
+            if (nCode >= 0 && KeysEnabled) {
+                KBDLLHOOKSTRUCT k = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
+                if ((k.flags & LLKHF_INJECTED) == 0 && (k.vkCode == VK_F8 || k.vkCode == VK_F9 || k.vkCode == VK_F10)) {
+                    bool mods = (GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0 || (GetAsyncKeyState(0x10) & 0x8000) != 0;
+                    if (!mods) {
+                        int msg = wParam.ToInt32();
+                        uint vk = k.vkCode;
+                        if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+                            if (vk == VK_F9) { if (!f9Down) { f9Down = true; KeyPending = 1; } }
+                            else if (vk == VK_F10) { if (!f10Down) { f10Down = true; KeyPending = 2; } }
+                            else { if (!f8Down) { f8Down = true; KeyPending = 3; } }
+                        } else if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
+                            if (vk == VK_F9) f9Down = false; else if (vk == VK_F10) f10Down = false; else f8Down = false;
+                        }
+                        return (IntPtr)1;
+                    }
+                }
+            }
+        } catch { }
+        return CallNextHookEx(khook, nCode, wParam, lParam);
     }
 
     // Leží bod v okně jiné aplikace než tato aplikace?
@@ -71,6 +122,13 @@ public static class KlirencCtrlClick {
         uint pid;
         GetWindowThreadProcessId(w, out pid);
         return pid != 0 && pid != ownPid;
+    }
+
+    // Je kurzor myši nad oknem jiné aplikace? (pro vložení klávesou F8)
+    public static bool CursorIsOther() {
+        POINT pt;
+        if (!GetCursorPos(out pt)) return false;
+        return PointIsOther(pt);
     }
 
     // Ctrl + levé kliknutí v jiné aplikaci: původní kliknutí se zahodí (aby se neprovedla akce Ctrl+klik)
@@ -215,15 +273,94 @@ function New-Item2([string]$value, [string]$note, [bool]$manual = $false, [strin
                        Station = $station; Length = $length; MapUrl = $mapUrl; Visible = $true }
 }
 
+# Vlastní dialog ve vzhledu aplikace (místo šedého okna Windows).
+# $kind: Information / Warning / Error / Question; $yesNo: tlačítka Ano / Ne. Vrací $true pro OK / Ano.
+function Show-KcDialog([string]$text, [string]$title, [string]$kind, [bool]$yesNo = $false) {
+    [xml]$dx = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight" ShowInTaskbar="False" WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI" FontSize="14" UseLayoutRounding="True" Topmost="False">
+  <Window.Resources>
+    <Style x:Key="DBtn" TargetType="Button" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+      <Setter Property="Background" Value="#E8EDF4"/>
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="MinWidth" Value="96"/>
+      <Setter Property="Padding" Value="18,8"/>
+      <Setter Property="Margin" Value="8,0,0,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <Border Margin="18" Background="White" CornerRadius="12" BorderBrush="#E2E8F0" BorderThickness="1" MinWidth="360" MaxWidth="480">
+    <Border.Effect><DropShadowEffect BlurRadius="22" ShadowDepth="3" Opacity="0.22" Color="#0F172A"/></Border.Effect>
+    <Grid Margin="22,20,22,18">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <StackPanel Name="Head" Orientation="Horizontal" Background="Transparent">
+        <Border Name="IconBg" Width="30" Height="30" CornerRadius="15" Background="#0E7490">
+          <TextBlock Name="IconTx" Text="i" Foreground="White" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBlock Name="TitleTx" FontSize="16" FontWeight="SemiBold" Foreground="#0F172A" Margin="12,0,0,0" VerticalAlignment="Center"/>
+      </StackPanel>
+      <TextBlock Name="MsgTx" Grid.Row="1" TextWrapping="Wrap" Foreground="#334155" Margin="0,14,0,20" LineHeight="20"/>
+      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Name="BNo" Style="{StaticResource DBtn}" Content="Ne" IsCancel="True"/>
+        <Button Name="BYes" Style="{StaticResource DBtn}" Content="OK" IsDefault="True" Background="#0E7490" Foreground="White" FontWeight="SemiBold"/>
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>
+'@
+    $d = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
+    if ($win -and $win.IsLoaded) { $d.Owner = $win } else { $d.WindowStartupLocation = 'CenterScreen' }
+    $colors = @{ Information = '#0E7490'; Question = '#0E7490'; Warning = '#D97706'; Error = '#E11D48' }
+    $glyphs = @{ Information = 'i'; Question = '?'; Warning = '!'; Error = '✕' }
+    if (-not $colors.ContainsKey($kind)) { $kind = 'Information' }
+    $d.FindName('IconBg').Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($colors[$kind]))
+    $d.FindName('IconTx').Text = $glyphs[$kind]
+    $d.FindName('TitleTx').Text = $title
+    $d.FindName('MsgTx').Text = $text
+    $bYes = $d.FindName('BYes'); $bNo = $d.FindName('BNo')
+    if ($yesNo) { $bYes.Content = 'Ano' }
+    else { $bNo.Visibility = 'Collapsed'; $bYes.IsCancel = $true }
+    if ($kind -eq 'Error' -or $kind -eq 'Warning') { if (-not $yesNo) { $bYes.Background = $d.FindName('IconBg').Background } }
+    $script:DlgResult = $false
+    $bYes.Add_Click({ $script:DlgResult = $true; $d.Close() })
+    $bNo.Add_Click({ $script:DlgResult = $false; $d.Close() })
+    $d.FindName('Head').Add_MouseLeftButtonDown({ try { $d.DragMove() } catch { } })   # okno jde přetáhnout za nadpis
+    [void]$d.ShowDialog()
+    return [bool]$script:DlgResult
+}
+
 function Show-Msg([string]$text, [string]$icon) {
-    if ($win) { [void][System.Windows.MessageBox]::Show($win, $text, 'Kontrola Clearance', 'OK', $icon) }
-    else { [void][System.Windows.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', $icon) }
+    try {
+        $title = switch ($icon) { 'Warning' { 'Upozornění' } 'Error' { 'Chyba' } default { 'Kontrola Clearance' } }
+        [void](Show-KcDialog $text $title $icon $false)
+    } catch {
+        # záloha: běžné okno Windows
+        if ($win) { [void][System.Windows.MessageBox]::Show($win, $text, 'Kontrola Clearance', 'OK', $icon) }
+        else { [void][System.Windows.MessageBox]::Show($text, 'Kontrola Clearance', 'OK', $icon) }
+    }
 }
 function Show-Info([string]$text)  { Show-Msg $text 'Information' }
 function Show-Warn([string]$text)  { Show-Msg $text 'Warning' }
 function Show-Error([string]$text) { Show-Msg $text 'Error' }
 function Ask-YesNo([string]$text, [string]$title, [string]$icon = 'Question') {
-    ([System.Windows.MessageBox]::Show($win, $text, $title, 'YesNo', $icon)) -eq 'Yes'
+    try { return (Show-KcDialog $text $title $icon $true) }
+    catch { return ([System.Windows.MessageBox]::Show($win, $text, $title, 'YesNo', $icon)) -eq 'Yes' }
 }
 
 # Bezpečné spuštění obsluhy události - uživateli se nezobrazí technická chyba
@@ -727,6 +864,56 @@ function Update-Shortcuts {
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- Nabídka pravého tlačítka ve vzhledu aplikace -->
+    <Style x:Key="KcMenu" TargetType="ContextMenu">
+      <Setter Property="HasDropShadow" Value="False"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ContextMenu">
+            <Border Background="White" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" Padding="4" Margin="0,0,10,10">
+              <Border.Effect><DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.18" Color="#0F172A"/></Border.Effect>
+              <StackPanel IsItemsHost="True"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="KcMenuItem" TargetType="MenuItem">
+      <Setter Property="Foreground" Value="#0F172A"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="MenuItem">
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="12,7">
+              <ContentPresenter ContentSource="Header" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBg}"/>
+                <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Bublinová nápověda (tooltip) ve vzhledu aplikace -->
+    <Style TargetType="ToolTip">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToolTip">
+            <Border Background="#1E293B" CornerRadius="6" Padding="9,5">
+              <ContentPresenter/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
 
   <Grid>
@@ -735,11 +922,13 @@ function Update-Shortcuts {
     <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="20,12">
       <Grid>
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <TextBlock Text="Kontrola Clearance" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
         <CheckBox x:Name="ChkCtrl" Grid.Column="2" Content="Vkládat Ctrl + kliknutím" IsChecked="True" VerticalAlignment="Center" Margin="0,0,28,0" Foreground="{StaticResource Muted}"/>
-        <TextBlock x:Name="PosText" Grid.Column="3" Text="0 / 0" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"/>
+        <CheckBox x:Name="ChkKeys" Grid.Column="3" Content="Klávesy F8 / F9 / F10" IsChecked="True" VerticalAlignment="Center" Margin="0,0,28,0" Foreground="{StaticResource Muted}"
+                  ToolTip="F8 = vložit údaj do pole pod myší, F9 = Ponechat, F10 = Vymazat – fungují i v jiném okně"/>
+        <TextBlock x:Name="PosText" Grid.Column="4" Text="0 / 0" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"/>
       </Grid>
     </Border>
 
@@ -828,8 +1017,18 @@ function Update-Shortcuts {
         <!-- Ponechat / Vymazat -->
         <Grid Grid.Row="2">
           <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-          <Button x:Name="BtnYes" Style="{StaticResource BtnBig}" Background="#16A34A" Content="Ponechat"/>
-          <Button x:Name="BtnNo" Grid.Column="1" Style="{StaticResource BtnBig}" Background="#E11D48" Content="Vymazat"/>
+          <Button x:Name="BtnYes" Style="{StaticResource BtnBig}" Background="#16A34A">
+            <StackPanel>
+              <TextBlock Text="Ponechat" HorizontalAlignment="Center"/>
+              <TextBlock x:Name="KeyHintYes" Text="F9" FontSize="12" FontWeight="Normal" Opacity="0.8" HorizontalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="BtnNo" Grid.Column="1" Style="{StaticResource BtnBig}" Background="#E11D48">
+            <StackPanel>
+              <TextBlock Text="Vymazat" HorizontalAlignment="Center"/>
+              <TextBlock x:Name="KeyHintNo" Text="F10" FontSize="12" FontWeight="Normal" Opacity="0.8" HorizontalAlignment="Center"/>
+            </StackPanel>
+          </Button>
         </Grid>
 
         <!-- Vedlejší akce -->
@@ -885,7 +1084,7 @@ function Update-Shortcuts {
 '@
 
 $win = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
-foreach ($n in @('ChkCtrl','PosText','InputBox','ItemsList','BtnLoad','BtnClear','CountText',
+foreach ($n in @('ChkCtrl','ChkKeys','KeyHintYes','KeyHintNo','PosText','InputBox','ItemsList','BtnLoad','BtnClear','CountText',
                  'BtnUp','BtnDown','CurrentNote','CurrentText','BtnYes','BtnNo','BtnUnsure','BtnMap','BtnExcel','RevisionText','BusyOverlay','StickyHeader','StickyContent',
                  'FileNameBox','NotesCaption','NotesBox','BtnOpen','BtnSave','BtnSaveAs')) {
     Set-Variable -Name $n -Value $win.FindName($n) -Scope Script
@@ -1311,6 +1510,7 @@ function Start-List($parsed) {
     $script:Items = Group-Items $parsed.Items
     $script:Revision = [string]$parsed.Revision
     $script:GroupFilter = @{}
+    $script:SavedFilter = @{}
     # po načtení jsou všechny složky sbalené
     $script:Collapsed = @{}
     foreach ($it in $script:Items) { $script:Collapsed[$it.Category] = $true }
@@ -1454,6 +1654,98 @@ $StickyHeader.Add_MouseLeftButtonUp({ param($s, $e) Invoke-Safe {
     $StickyHeader.Visibility = 'Collapsed'
 } 'Složku se nepodařilo sbalit.' })
 
+# Ve složce záznamu nechá ve filtru jen jeho stanici a délky nastaví na Vše (zobrazí se všechny délky dané stanice).
+# Složka se rozbalí a záznam se stane aktuálním.
+$script:SavedFilter = @{}   # složka -> filtr před „Zobrazit vše z této stanice“ (pro „Vrátit původní filtr“)
+
+# Nastaví zaškrtnutí voleb podle množin vyloučených hodnot a přepočítá složku
+function Set-GroupFilterState([string]$cat, $excludedS, $excludedL) {
+    $h = $script:Headers[$cat]
+    $f = Get-GroupFilter $cat
+    $f.S.Clear(); foreach ($v in $excludedS) { [void]$f.S.Add($v) }
+    $f.L.Clear(); foreach ($v in $excludedL) { [void]$f.L.Add($v) }
+    $script:Syncing = $true
+    try {
+        foreach ($o in $h.SOptions) { if (-not $o.IsAll) { $o.Checked = -not $f.S.Contains($o.Text) } }
+        foreach ($o in $h.LOptions) { if (-not $o.IsAll) { $o.Checked = -not $f.L.Contains($o.Text) } }
+    } finally { $script:Syncing = $false }
+    Update-Group $cat
+}
+
+function Show-StationOnly([int]$idx) {
+    $it = $script:Items[$idx]
+    $cat = $it.Category
+    $h = $script:Headers[$cat]
+    $f = Get-GroupFilter $cat
+    # zapamatovat původní filtr (jen poprvé, aby se dalo vrátit i po několika stanicích za sebou)
+    if (-not $script:SavedFilter.ContainsKey($cat)) {
+        $script:SavedFilter[$cat] = @{ S = @($f.S); L = @($f.L) }
+    }
+    $st = Get-OptText $it.Station
+    $exclS = @($h.SOptions | Where-Object { -not $_.IsAll -and $_.Text -ne $st } | ForEach-Object { $_.Text })
+    [void]$script:Collapsed.Remove($cat)
+    Set-GroupFilterState $cat $exclS @()
+    $script:Index = $idx
+    $script:Done = $false
+    Show-Current
+}
+
+# Vrátí filtr složky do stavu před „Zobrazit vše z této stanice“
+function Restore-GroupFilter([string]$cat) {
+    $saved = $script:SavedFilter[$cat]
+    if ($null -eq $saved) { return }
+    $script:SavedFilter.Remove($cat)
+    Set-GroupFilterState $cat $saved.S $saved.L
+    # aktuální řádek se schoval: přejít na další viditelný nerozhodnutý
+    if ($script:Done -or -not $script:Items[$script:Index].Visible) { Move-NextUndecided $false }
+    else { Update-View }
+}
+
+# Pravé tlačítko na záznamu: „Zobrazit vše z této stanice“ a „Vrátit původní filtr“
+$script:CtxIndex = -1
+$script:CtxCategory = $null
+$ctxMenu = New-Object System.Windows.Controls.ContextMenu
+$ctxStation = New-Object System.Windows.Controls.MenuItem
+$ctxStation.Header = 'Zobrazit vše z této stanice'
+$ctxRestore = New-Object System.Windows.Controls.MenuItem
+$ctxRestore.Header = 'Vrátit původní filtr'
+[void]$ctxMenu.Items.Add($ctxStation)
+[void]$ctxMenu.Items.Add($ctxRestore)
+try {
+    $ctxMenu.Style = $win.FindResource('KcMenu')
+    $ctxStation.Style = $win.FindResource('KcMenuItem')
+    $ctxRestore.Style = $win.FindResource('KcMenuItem')
+} catch { }
+$ItemsList.ContextMenu = $ctxMenu
+$ItemsList.Add_ContextMenuOpening({ param($s, $e)
+    $script:CtxIndex = -1
+    $script:CtxCategory = $null
+    $c = $null
+    if ($e.OriginalSource -is [System.Windows.DependencyObject]) {
+        $c = [System.Windows.Controls.ItemsControl]::ContainerFromElement($ItemsList, $e.OriginalSource)
+    }
+    if ($null -eq $c -or $null -eq $c.DataContext) { $e.Handled = $true; return }
+    $row = $c.DataContext
+    $script:CtxCategory = $row.Category
+    $canRestore = $script:SavedFilter.ContainsKey($row.Category)
+    if ($row.Kind -eq 'I') {
+        $script:CtxIndex = $row.Index
+        $st = $script:Items[$script:CtxIndex].Station
+        $ctxStation.Header = if ($st -ne '') { "Zobrazit vše z této stanice ($st)" } else { 'Zobrazit vše z této stanice' }
+        $ctxStation.Visibility = 'Visible'
+    } else {
+        $ctxStation.Visibility = 'Collapsed'   # na záhlaví složky jen vrácení filtru
+        if (-not $canRestore) { $e.Handled = $true; return }
+    }
+    $ctxRestore.Visibility = if ($canRestore) { 'Visible' } else { 'Collapsed' }
+})
+$ctxStation.Add_Click({ Invoke-Safe {
+    if ($script:CtxIndex -ge 0 -and $script:CtxIndex -lt $script:Items.Count) { Show-StationOnly $script:CtxIndex }
+} 'Filtr se nepodařilo použít.' })
+$ctxRestore.Add_Click({ Invoke-Safe {
+    if ($null -ne $script:CtxCategory) { Restore-GroupFilter $script:CtxCategory }
+} 'Filtr se nepodařilo vrátit.' })
+
 # Šipky na klávesnici v seznamu: o záznam nahoru / dolů (záhlaví složek se přeskakují)
 $ItemsList.Add_PreviewKeyDown({ param($s, $e)
     if ($e.OriginalSource -is [System.Windows.Controls.Primitives.ToggleButton]) { return }
@@ -1561,10 +1853,53 @@ $ChkCtrl.Add_Click({
     if ($script:MiddleHookOk) { [KlirencCtrlClick]::Enabled = [bool]$ChkCtrl.IsChecked }
 })
 
+# ---------- Klávesy F8 (vložit), F9 (Ponechat) a F10 (Vymazat) ----------
+# Fungují v celých Windows, i když je aktivní jiné okno; vypínají se zaškrtávátkem v hlavičce
+$script:KeysOk = $false
+try { $script:KeysOk = [KlirencCtrlClick]::StartKeys() } catch { $script:KeysOk = $false }
+if (-not $script:KeysOk) {
+    $ChkKeys.IsChecked = $false
+    $ChkKeys.IsEnabled = $false
+    $ChkKeys.Content = 'Klávesy F8 / F9 / F10 nejsou dostupné'
+}
+function Update-KeyHints {
+    $v = if ($script:KeysOk -and [bool]$ChkKeys.IsChecked) { 'Visible' } else { 'Collapsed' }
+    $KeyHintYes.Visibility = $v; $KeyHintNo.Visibility = $v
+}
+Update-KeyHints
+$ChkKeys.Add_Click({
+    if ($script:KeysOk) { [KlirencCtrlClick]::KeysEnabled = [bool]$ChkKeys.IsChecked }
+    Update-KeyHints
+})
+$script:InKeyAction = $false
+
 # Po Ctrl + kliknutí: do schránky dát aktuální údaj a vložit ho do pole, kam se kliklo
 $ctrlTimer = New-Object System.Windows.Threading.DispatcherTimer
 $ctrlTimer.Interval = [TimeSpan]::FromMilliseconds(40)
 $ctrlTimer.Add_Tick({
+    # F8 / F9 / F10 -> vložit / Ponechat / Vymazat (jen jednou najednou, např. když je otevřená hláška)
+    try {
+        if ($script:KeysOk -and -not $script:InKeyAction) {
+            $k = [KlirencCtrlClick]::KeyPending
+            if ($k -ne 0) {
+                [KlirencCtrlClick]::KeyPending = 0
+                $script:InKeyAction = $true
+                try {
+                    if ($k -eq 1) { Invoke-Safe { Set-Decision 'keep' } 'Přechod na další řádek se nezdařil.' }
+                    elseif ($k -eq 2) { Invoke-Safe { Set-Decision 'del' } 'Zápis poznámky se nezdařil.' }
+                    elseif ($k -eq 3) {
+                        # F8: vložit aktuální údaj do pole jiné aplikace, nad kterým je myš (bez klikání)
+                        if (-not $script:Done -and $script:Index -lt $script:Items.Count -and [KlirencCtrlClick]::CursorIsOther()) {
+                            if (Set-ClipboardText $script:Items[$script:Index].Value) {
+                                Start-Sleep -Milliseconds 60
+                                [KlirencCtrlClick]::ClickSelectAllPaste()
+                            }
+                        }
+                    }
+                } finally { $script:InKeyAction = $false }
+            }
+        }
+    } catch { }
     try {
         if (-not $script:MiddleHookOk -or -not [KlirencCtrlClick]::Pending) { return }
         [KlirencCtrlClick]::Pending = $false
@@ -1575,7 +1910,7 @@ $ctrlTimer.Add_Tick({
         }
     } catch { }
 })
-if ($script:MiddleHookOk) { $ctrlTimer.Start() }
+if ($script:MiddleHookOk -or $script:KeysOk) { $ctrlTimer.Start() }
 
 $win.Add_Loaded({
     # zástupce se aktualizuje až po zobrazení okna, aby nezdržoval start
@@ -1590,5 +1925,5 @@ try {
 } catch {
     Show-Error 'Aplikace narazila na neočekávaný problém a bude ukončena.'
 } finally {
-    try { $ctrlTimer.Stop(); if ($script:MiddleHookOk) { [KlirencCtrlClick]::Stop() } } catch { }
+    try { $ctrlTimer.Stop(); [KlirencCtrlClick]::Stop() } catch { }
 }
